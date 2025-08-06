@@ -70,6 +70,7 @@ function App() {
   const [attendanceResults, setAttendanceResults] = useState([]);
   const [showAddUser, setShowAddUser] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
   const [isFlashOn, setIsFlashOn] = useState(false);
   const videoRef = useRef(null);
   const codeReader = useRef(null);
@@ -218,6 +219,22 @@ function App() {
     console.log('⚡ Toggling flash...');
     setIsFlashOn(!isFlashOn);
     // Note: Actual flash control would require camera API access
+  };
+
+  const handleZoomIn = () => {
+    setZoomLevel(prev => {
+      const newZoom = Math.min(prev + 0.1, 3);
+      applyCameraZoom(newZoom);
+      return newZoom;
+    });
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel(prev => {
+      const newZoom = Math.max(prev - 0.1, 1);
+      applyCameraZoom(newZoom);
+      return newZoom;
+    });
   };
 
   const applyCameraZoom = (zoom) => {
@@ -419,10 +436,10 @@ function App() {
                     </div>
 
                     {/* Camera Controls */}
-                    <div className="absolute top-4 right-4 flex flex-col gap-3">
+                    <div className="absolute bottom-4 left-4 flex items-center gap-2">
                       {/* Zoom In Button */}
                       <button
-                        onClick={() => applyCameraZoom(1.1)}
+                        onClick={handleZoomIn}
                         className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500 transition-colors"
                       >
                         <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
@@ -432,9 +449,14 @@ function App() {
                         <span className="text-black text-sm font-bold ml-1">+</span>
                       </button>
                       
+                      {/* Zoom Level Indicator */}
+                      <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+                        {Math.round(zoomLevel * 100)}%
+                      </div>
+                      
                       {/* Zoom Out Button */}
                       <button
-                        onClick={() => applyCameraZoom(0.9)}
+                        onClick={handleZoomOut}
                         className="w-12 h-12 bg-gray-400 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-500 transition-colors"
                       >
                         <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
