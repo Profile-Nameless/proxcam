@@ -53,15 +53,7 @@ const timetable = [
   }
 ];
 
-// Simple encryption/decryption functions
-const encryptData = (data) => {
-  try {
-    return btoa(encodeURIComponent(data));
-  } catch (error) {
-    console.error('Encryption error:', error);
-    return data;
-  }
-};
+// Simple decryption function (encryptData removed as it's not used)
 
 const decryptData = (encryptedData) => {
   try {
@@ -80,7 +72,6 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isFlashOn, setIsFlashOn] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
   const videoRef = useRef(null);
   const codeReader = useRef(null);
 
