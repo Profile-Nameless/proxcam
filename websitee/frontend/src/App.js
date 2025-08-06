@@ -170,7 +170,6 @@ function App() {
     console.log('📷 Opening camera...');
     setIsCameraOpen(true);
     setAttendanceResults([]);
-    setIsScanning(false);
     setTimeout(() => {
       console.log('🎬 Starting scanner...');
       startScanner();
@@ -191,7 +190,6 @@ function App() {
     
     console.log('🔍 Initializing QR scanner...');
     codeReader.current = new BrowserMultiFormatReader();
-    setIsScanning(true);
     
     console.log('🎥 Starting video stream...');
     codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
@@ -215,7 +213,6 @@ function App() {
       codeReader.current = null;
       console.log('✅ Scanner stopped');
     }
-    setIsScanning(false);
   };
 
   const handleZoomIn = () => {
