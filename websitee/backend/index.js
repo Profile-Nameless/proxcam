@@ -11,6 +11,11 @@ app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
 
+// Test endpoint to verify backend is working
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'Backend is working!', timestamp: new Date().toISOString() });
+});
+
 // Initialize Supabase client
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
