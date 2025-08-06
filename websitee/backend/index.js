@@ -53,7 +53,7 @@ async function myCamuLogin(email, password) {
 }
 
 // POST /login: Get name and StuID
-app.post('/login', async (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   try {
     const response = await myCamuLogin(email, password);
@@ -100,7 +100,7 @@ app.post('/login', async (req, res) => {
 });
 
 // POST /get-cookie: Get session cookie
-app.post('/get-cookie', async (req, res) => {
+app.post('/api/get-cookie', async (req, res) => {
   const { email, password } = req.body;
   console.log('🍪 Cookie request received:');
   console.log(`  Email: ${email}`);
@@ -120,7 +120,7 @@ app.post('/get-cookie', async (req, res) => {
 });
 
 // GET /users: Get all users from Supabase (for admin use)
-app.get('/users', async (req, res) => {
+app.get('/api/users', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('attendance_records')
@@ -139,7 +139,7 @@ app.get('/users', async (req, res) => {
 });
 
 // GET /users-for-frontend: Get users with encrypted passwords for frontend use
-app.get('/users-for-frontend', async (req, res) => {
+app.get('/api/users-for-frontend', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('attendance_records')
@@ -175,7 +175,7 @@ app.get('/users-for-frontend', async (req, res) => {
 });
 
 // POST /mark-attendance: Mark attendance for a user
-app.post('/mark-attendance', async (req, res) => {
+app.post('/api/mark-attendance', async (req, res) => {
   const { stuId, attendanceId, cookie } = req.body;
   try {
     const url = 'https://student.bennetterp.camu.in/api/Attendance/record-online-attendance';
