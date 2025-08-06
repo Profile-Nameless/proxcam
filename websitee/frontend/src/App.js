@@ -53,7 +53,7 @@ const timetable = [
   }
 ];
 
-// Simple decryption function (encryptData removed as it's not used)
+// Simple decryption function
 
 const decryptData = (encryptedData) => {
   try {
