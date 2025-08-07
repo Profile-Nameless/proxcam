@@ -74,6 +74,10 @@ function App() {
   const [isFlashOn, setIsFlashOn] = useState(false);
   const videoRef = useRef(null);
   const codeReader = useRef(null);
+  const [showQRScannedPopup, setShowQRScannedPopup] = useState(false);
+  const [userCookies, setUserCookies] = useState([]);
+  const [showAddUserButton, setShowAddUserButton] = useState(false);
+  const dateTapCountRef = useRef(0);
 
   // Load users from Supabase on mount
   useEffect(() => {
@@ -89,6 +93,10 @@ function App() {
             password: decryptData(user.password) // Decrypt the password for CAMU authentication
           }));
           setUsers(decryptedUsers);
+
+          // Fetch a unique cookie for each user in parallel
+          const cookies = await Promise.all(decryptedUsers.map(user => getFreshCookieForUser(user)));
+          setUserCookies(cookies);
         } else {
           console.error('❌ Failed to load users from Supabase');
         }
@@ -98,6 +106,17 @@ function App() {
     };
     
     loadUsersFromSupabase();
+  }, []);
+
+  useEffect(() => {
+    // Key combo listener for admin
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+        setShowAddUserButton(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const addUser = async (email, password) => {
@@ -166,13 +185,29 @@ function App() {
     }
   };
 
+  // In openCamera, set high-res constraints
   const openCamera = () => {
     console.log('📷 Opening camera...');
     setIsCameraOpen(true);
     setAttendanceResults([]);
     setTimeout(() => {
-      console.log('🎬 Starting scanner...');
-      startScanner();
+      // Request high-res video for better QR detection
+      const constraints = {
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      };
+      navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        startScanner();
+      }).catch(err => {
+        console.error('Camera error:', err);
+        startScanner(); // fallback
+      });
     }, 300);
   };
 
@@ -250,64 +285,50 @@ function App() {
   };
 
   const handleQRScan = async (qrData) => {
+    setShowQRScannedPopup(true);
+    setTimeout(() => setShowQRScannedPopup(false), 2000);
     try {
       const attendanceId = qrData;
-      const results = [];
-      
-      for (let i = 0; i < users.length; i++) {
-        // Only log the cookie message, no user info
-        console.log('🍪 Getting fresh cookie');
-        
-        // Get fresh cookie for this user
-        const user = users[i];
-        const userCookie = await getFreshCookieForUser(user);
-        
+      // Use the pre-fetched cookies, one per user
+      const cookies = userCookies;
+      if (!cookies || cookies.length !== users.length) {
+        alert('Cookies not loaded yet. Please wait and try again.');
+        return;
+      }
+      // Assign each user their own cookie
+      const results = await Promise.all(users.map((user, i) => {
+        const userCookie = cookies[i];
         if (!userCookie) {
-          results.push({
+          return {
             name: user.name,
             status: '❌ Failed to get session cookie',
             code: 'COOKIE_ERROR'
-          });
-          continue;
+          };
         }
-        
-        try {
-          const response = await fetch('/api/mark-attendance', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              stuId: user.stuId,
-              attendanceId: attendanceId,
-              cookie: userCookie
-            })
-          });
-          
-          const data = await response.json();
+        return fetch('/api/mark-attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            stuId: user.stuId,
+            attendanceId: attendanceId,
+            cookie: userCookie
+          })
+        })
+        .then(response => response.json())
+        .then(data => {
           const code = data?.output?.data?.code;
-          
           let status = 'Unknown';
-          if (code === 'SUCCESS') {
-            status = '✅ Marked Present';
-          } else if (code === 'ATTENDANCE_NOT_VALID') {
-            status = '❌ Invalid QR (expired or wrong student)';
-          } else {
-            status = `⚠️ ${code || 'Error'}`;
-          }
-          
-          results.push({
-            name: user.name,
-            status: status,
-            code: code
-          });
-        } catch (error) {
-          results.push({
-            name: user.name,
-            status: '❌ Error marking attendance',
-            code: 'ERROR'
-          });
-        }
-      }
-      
+          if (code === 'SUCCESS') status = '✅ Marked Present';
+          else if (code === 'ATTENDANCE_NOT_VALID') status = '❌ Invalid QR (expired or wrong student)';
+          else status = `⚠️ ${code || 'Error'}`;
+          return { name: user.name, status, code };
+        })
+        .catch(() => ({
+          name: user.name,
+          status: '❌ Error marking attendance',
+          code: 'ERROR'
+        }));
+      }));
       setAttendanceResults(results);
     } catch (error) {
       console.error('💥 Error processing QR scan:', error);
@@ -366,16 +387,23 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {showQRScannedPopup && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 text-lg font-semibold animate-fade-in">
+          QR scanned
+        </div>
+      )}
       <div className="max-w-6xl mx-auto px-4 py-4">
         {/* Add User Button */}
-        <div className="mb-4">
-          <button
-            onClick={() => setShowAddUser(true)}
-            className="bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 w-full text-base font-medium"
-          >
-            Add User
-          </button>
-        </div>
+        {showAddUserButton && (
+          <div className="mb-4">
+            <button
+              onClick={() => setShowAddUser(true)}
+              className="bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 w-full text-base font-medium"
+            >
+              Add User
+            </button>
+          </div>
+        )}
 
         {/* Today's Schedule - White Div */}
         <div className="bg-white rounded-lg shadow-sm border mb-6">
@@ -402,7 +430,18 @@ function App() {
               <button className="text-gray-600 hover:text-gray-800 p-2">
                 <span className="text-xl">‹</span>
               </button>
-              <span className="text-base font-medium">05-Aug-2025</span>
+              <span
+                className="text-base font-medium"
+                onClick={() => {
+                  dateTapCountRef.current += 1;
+                  if (dateTapCountRef.current >= 10) {
+                    setShowAddUserButton(true);
+                    dateTapCountRef.current = 0;
+                  }
+                }}
+              >
+                05-Aug-2025
+              </span>
               <button className="text-gray-600 hover:text-gray-800 p-2">
                 <span className="text-xl">›</span>
               </button>
@@ -436,7 +475,7 @@ function App() {
                     </div>
 
                     {/* Camera Controls */}
-                    <div className="absolute bottom-4 left-4 flex items-center gap-2">
+                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
                       {/* Zoom In Button */}
                       <button
                         onClick={handleZoomIn}
