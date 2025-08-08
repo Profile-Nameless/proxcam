@@ -82,6 +82,7 @@ function App() {
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
+  const lastWorkerDecodeAtRef = useRef(0);
 
   // Load users and cookies on mount (fast path)
   useEffect(() => {
@@ -246,12 +247,29 @@ function App() {
     console.log('📱 Starting ZXing QR Scanner (simple mode) + WASM worker fallback...');
     
     codeReader.current = new BrowserMultiFormatReader();
-    
-    const constraints = { video: { facingMode: 'environment' } };
+
+    // Prefer high resolution (up to 4K) when supported
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 3840 },
+        height: { ideal: 2160 },
+        frameRate: { ideal: 60, min: 15 }
+      }
+    };
 
     navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        try {
+          const track = stream.getVideoTracks?.()[0];
+          const capabilities = track?.getCapabilities?.();
+          if (capabilities && capabilities.width && capabilities.height) {
+            const targetW = Math.min(3840, capabilities.width.max || 3840);
+            const targetH = Math.min(2160, capabilities.height.max || 2160);
+            track.applyConstraints({ width: targetW, height: targetH }).catch(() => {});
+          }
+        } catch {}
         videoRef.current.play().catch(() => {});
       }
       // Start the scanner
@@ -264,8 +282,10 @@ function App() {
           closeCamera();
         } else if (err && err.name !== 'NotFoundException') {
           // keep scanning; ignore NotFoundException
-          // Periodically try a high-res still decoded in a Web Worker (WASM)
-          if (videoRef.current && performance.now() % 1500 < 50) {
+          // Trigger high-res worker decode every ~350ms
+          const now = performance.now();
+          if (videoRef.current && now - lastWorkerDecodeAtRef.current > 350) {
+            lastWorkerDecodeAtRef.current = now;
             tryDecodeWithWorkerOnce();
           }
         } else {
@@ -652,31 +672,25 @@ function App() {
 
                     {/* Scanning hint removed */}
 
-                    {/* Zoom Controls */}
-                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
-                      <button
-                        onClick={handleZoomIn}
-                        className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-black text-sm font-bold ml-1">+</span>
-                      </button>
-                      <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
-                        {Math.round(zoomLevel * 100)}%
+                    {/* Zoom Slider */}
+                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-2/3 sm:w-1/2 px-4">
+                      <div className="bg-black/50 backdrop-blur rounded-lg px-3 py-2">
+                        <input
+                          type="range"
+                          min="1"
+                          max="3"
+                          step="0.05"
+                          value={zoomLevel}
+                          onChange={(e) => {
+                            const next = parseFloat(e.target.value);
+                            setZoomLevel(next);
+                            applyZoom(next);
+                          }}
+                          className="range w-full"
+                          aria-label="Zoom"
+                        />
+                        <div className="text-center text-xs text-white mt-1">{Math.round(zoomLevel * 100)}%</div>
                       </div>
-                      <button
-                        onClick={handleZoomOut}
-                        className="w-12 h-12 bg-gray-400 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-500 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-black text-sm font-bold ml-1">-</span>
-                      </button>
                     </div>
 
                     {/* Close Button */}
