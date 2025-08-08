@@ -1,7 +1,6 @@
 // Force redeploy - Latest QR scanner with enhanced focus capabilities
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
-import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import './App.css';
 
 const timetable = [
@@ -72,22 +71,13 @@ function App() {
   const [attendanceResults, setAttendanceResults] = useState([]);
   const [showAddUser, setShowAddUser] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [isFlashOn, setIsFlashOn] = useState(false);
   const videoRef = useRef(null);
   const codeReader = useRef(null);
-  const barcodeDetectorRef = useRef(null);
-  const zxingCoreRef = useRef(null);
   const [showQRScannedPopup, setShowQRScannedPopup] = useState(false);
   const [userCookies, setUserCookies] = useState([]);
   const [showAddUserButton, setShowAddUserButton] = useState(false);
   const dateTapCountRef = useRef(0);
   const [scanningHint, setScanningHint] = useState('');
-  const [brightness, setBrightness] = useState(1);
-  const [contrast, setContrast] = useState(1);
-  const [scanAttempts, setScanAttempts] = useState(0);
-  const [cameraStatus, setCameraStatus] = useState('initializing');
-  const [scannerSwitchAttempts, setScannerSwitchAttempts] = useState(0);
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
@@ -114,14 +104,14 @@ function App() {
         console.warn('Fast path failed, falling back to users-for-frontend + get-cookie');
         const response = await fetch('/api/users-for-frontend', { cache: 'no-store' });
         if (!response.ok) throw new Error('Failed users-for-frontend');
-        const supabaseUsers = await response.json();
-        const decryptedUsers = supabaseUsers.map(user => ({
-          ...user,
+          const supabaseUsers = await response.json();
+          const decryptedUsers = supabaseUsers.map(user => ({
+            ...user,
           password: decryptData(user.password)
-        }));
-        setUsers(decryptedUsers);
-        const cookies = await Promise.all(decryptedUsers.map(user => getFreshCookieForUser(user)));
-        setUserCookies(cookies);
+          }));
+          setUsers(decryptedUsers);
+          const cookies = await Promise.all(decryptedUsers.map(user => getFreshCookieForUser(user)));
+          setUserCookies(cookies);
       } catch (error) {
         console.error('❌ Error loading users from Supabase:', error);
       }
@@ -228,8 +218,6 @@ function App() {
     setIsCameraOpen(true);
     setAttendanceResults([]);
     setScanningHint('Initializing camera...');
-    setScanAttempts(0);
-    setCameraStatus('initializing');
     setTimeout(() => {
       startScanner();
     }, 300);
@@ -238,7 +226,6 @@ function App() {
   const closeCamera = () => {
     console.log('📷 Closing camera...');
     setIsCameraOpen(false);
-    setCameraStatus('closed');
     stopScanner();
   };
 
@@ -251,131 +238,45 @@ function App() {
     }
     
     console.log('🔍 Initializing QR scanner...');
-    setCameraStatus('starting');
     startZxingScanner();
   };
 
   const startZxingScanner = () => {
-    console.log('📱 Starting Enhanced ZXing QR Scanner...');
+    console.log('📱 Starting ZXing QR Scanner (simple mode) + WASM worker fallback...');
     
-    // Proper ZXing hints focusing on QR with robustness
-    const formats = [BarcodeFormat.QR_CODE];
-    const hints = new Map();
-    hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
-    hints.set(DecodeHintType.TRY_HARDER, true);
-    // Inverted helps with dark/bright projector backgrounds
-    hints.set(DecodeHintType.ALSO_INVERTED, true);
+    codeReader.current = new BrowserMultiFormatReader();
+    
+    const constraints = { video: { facingMode: 'environment' } };
 
-    codeReader.current = new BrowserMultiFormatReader(hints);
-    
-    // Simplified camera constraints to prevent black screen
-    const constraints = {
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1920, min: 640 },
-        height: { ideal: 1080, min: 480 },
-        frameRate: { ideal: 30, min: 15 }
-      }
-    };
-    
-    // First get the video stream
-    navigator.mediaDevices.getUserMedia(constraints).then(async (stream) => {
+    navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Try to enable continuous focus/exposure where available
-        try {
-          const [track] = stream.getVideoTracks();
-          if (track && typeof track.getCapabilities === 'function') {
-            const capabilities = track.getCapabilities();
-            const advanced = [];
-            if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
-              advanced.push({ focusMode: 'continuous' });
-            }
-            if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
-              advanced.push({ exposureMode: 'continuous' });
-            }
-            if (advanced.length) {
-              await track.applyConstraints({ advanced });
-            }
-          }
-        } catch {}
-
         videoRef.current.play().then(() => {
           console.log('✅ Video stream started successfully');
-          setCameraStatus('active');
           setScanningHint('Camera ready. Position QR code in frame');
         }).catch(err => {
           console.error('❌ Video play failed:', err);
-          setCameraStatus('error');
           setScanningHint('Camera failed to start');
         });
       }
-      
       // Start the scanner
       codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
         if (result) {
           console.log('🎯 QR Code detected by ZXing!');
           console.log('📄 QR Data:', result.getText());
-          console.log('📊 Format:', result.getFormat());
           setScanningHint('QR Code detected! Processing...');
-          setCameraStatus('scanning');
           handleQRScan(result.getText());
           closeCamera();
-        } else if (err && err.name !== 'NotFoundException') {
-           // still scanning
-          setScanAttempts(prev => prev + 1);
-          setScannerSwitchAttempts(prev => prev + 1);
-          
-          // Auto-adjust settings based on scan attempts
-          handleScanAttempts();
-          
-          // Restart scanner if too many attempts
-          if (scannerSwitchAttempts > 30) {
-            console.log('🔄 Restarting ZXing scanner...');
-            setScannerSwitchAttempts(0);
-            setScanAttempts(0);
-            stopScanner();
-            setTimeout(() => {
-              startZxingScanner();
-            }, 1000);
-          }
-
-          // Fallback: try BarcodeDetector for skewed/low-contrast codes
-          if ('BarcodeDetector' in window && !barcodeDetectorRef.current && scannerSwitchAttempts > 8) {
-            console.log('🧪 Starting BarcodeDetector fallback');
-            startBarcodeDetectorFallback();
-          }
-          // Attempt CDN ZXing-core frame decode first for tough cases
-          if (scannerSwitchAttempts === 14) {
-            setScanningHint('Trying enhanced decode...');
-            tryZXingCoreDecodeOnce().then((text) => {
-              if (text) {
-                console.log('🎯 QR Code decoded via ZXing core');
-                setScanningHint('QR Code detected! Processing...');
-                setCameraStatus('scanning');
-                handleQRScan(text);
-                closeCamera();
-              }
-            });
-          }
-          // Last resort after many attempts: single server-side decode
-          if (scannerSwitchAttempts === 20) {
-            setScanningHint('Trying server-side decode...');
-            tryServerSideDecodeOnce().then((text) => {
-              if (text) {
-                console.log('🎯 QR Code decoded on server');
-                setScanningHint('QR Code detected! Processing...');
-                setCameraStatus('scanning');
-                handleQRScan(text);
-                closeCamera();
-              }
-            });
+        } else {
+          // keep scanning; ignore NotFoundException
+          // Periodically try a high-res still decoded in a Web Worker (WASM)
+          if (videoRef.current && performance.now() % 1500 < 50) {
+            tryDecodeWithWorkerOnce();
           }
         }
       });
     }).catch(err => {
       console.error('❌ Failed to get camera stream:', err);
-      setCameraStatus('error');
       setScanningHint('Camera access failed. Trying basic mode...');
       
       // Try with basic constraints
@@ -384,11 +285,9 @@ function App() {
           videoRef.current.srcObject = stream;
           videoRef.current.play().then(() => {
             console.log('✅ Basic video stream started');
-            setCameraStatus('active');
             setScanningHint('Camera ready (basic mode)');
           }).catch(err => {
             console.error('❌ Basic video play failed:', err);
-            setCameraStatus('error');
             setScanningHint('Camera failed to start');
           });
         }
@@ -397,19 +296,17 @@ function App() {
             console.log('🎯 QR Code detected by ZXing!');
             console.log('📄 QR Data:', result.getText());
             setScanningHint('QR Code detected! Processing...');
-            setCameraStatus('scanning');
             handleQRScan(result.getText());
             closeCamera();
           }
         });
       }).catch(fallbackErr => {
         console.error('❌ Camera access completely failed:', fallbackErr);
-        setCameraStatus('error');
         setScanningHint('Camera access failed. Please check permissions.');
       });
     });
     
-    console.log('✅ Enhanced ZXing Scanner started successfully');
+    console.log('✅ ZXing Scanner started');
   };
 
   const startBarcodeDetectorFallback = () => {
@@ -610,8 +507,61 @@ function App() {
       videoRef.current.srcObject = null;
     }
     
-    setCameraStatus('closed');
     setScanningHint('');
+  };
+
+  // One-shot decode using a Web Worker + ZXing WASM from a high-res frame
+  const tryDecodeWithWorkerOnce = async () => {
+    try {
+      const video = videoRef.current;
+      if (!video) return;
+      const track = video.srcObject?.getVideoTracks?.()[0];
+      if (!track) return;
+      // Prefer ImageCapture for full-res frame if available
+      let bitmap = null;
+      if ('ImageCapture' in window) {
+        try {
+          const capt = new window.ImageCapture(track);
+          bitmap = await capt.grabFrame();
+        } catch {}
+      }
+      if (!bitmap) {
+        // Fallback: draw current video frame
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        bitmap = await createImageBitmap(canvas);
+      }
+      if (!bitmap) return;
+
+      const worker = new Worker(new URL('./qrWorker.js', import.meta.url), { type: 'module' });
+      const result = await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          try { worker.terminate(); } catch {}
+          resolve(null);
+        }, 2000);
+        worker.onmessage = (ev) => {
+          const data = ev.data || {};
+          if (data.type === 'result') {
+            clearTimeout(timer);
+            try { worker.terminate(); } catch {}
+            resolve(data.text || null);
+          } else if (data.type === 'none' || data.type === 'error') {
+            clearTimeout(timer);
+            try { worker.terminate(); } catch {}
+            resolve(null);
+          }
+        };
+        worker.postMessage({ type: 'decode', bitmap }, [bitmap]);
+      });
+      if (result) {
+        setScanningHint('QR Code detected! Processing...');
+        handleQRScan(result);
+        closeCamera();
+      }
+    } catch {}
   };
 
   const toggleFlash = async () => {
@@ -721,8 +671,8 @@ function App() {
 
         try {
           const response = await fetchWithTimeout('/api/mark-attendance', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ stuId: user.stuId, attendanceId, cookie: userCookie })
           }, 9000);
           const data = await response.json().catch(() => ({}));
@@ -1003,7 +953,7 @@ function App() {
                         <p className="text-gray-400 text-xs mt-1">Attendance recorded</p>
                       )}
                     </div>
-                     {index === 2 && (
+                    {index === 2 && (
                       <button
                         onClick={() => {
                           if (!isReadyToScan) {
