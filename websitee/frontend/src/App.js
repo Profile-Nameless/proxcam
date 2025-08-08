@@ -1,6 +1,5 @@
 // Force redeploy - Latest QR scanner with enhanced focus capabilities
 import React, { useState, useEffect, useRef } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import './App.css';
 
@@ -84,7 +83,6 @@ function App() {
   const [brightness, setBrightness] = useState(1);
   const [contrast, setContrast] = useState(1);
   const [scanAttempts, setScanAttempts] = useState(0);
-  const [currentScanner, setCurrentScanner] = useState('html5'); // 'html5' or 'zxing'
   const [scannerSwitchAttempts, setScannerSwitchAttempts] = useState(0);
 
   // Load users from Supabase on mount
@@ -222,73 +220,15 @@ function App() {
     
     console.log('🔍 Initializing QR scanner...');
     
-    if (currentScanner === 'html5') {
-      startHtml5Scanner();
-    } else {
-      startZxingScanner();
-    }
-  };
-
-  const startHtml5Scanner = () => {
-    console.log('📱 Starting HTML5 QR Scanner...');
-    
-    // Create new Html5Qrcode instance
-    codeReader.current = new Html5Qrcode("qr-reader");
-    
-    const config = {
-      fps: 10,
-      qrbox: { width: 250, height: 250 },
-      aspectRatio: 1.0,
-      disableFlip: false
-    };
-    
-    codeReader.current.start(
-      { facingMode: "environment" },
-      config,
-      (decodedText, decodedResult) => {
-        console.log('🎯 QR Code detected by HTML5!');
-        console.log('📄 QR Data:', decodedText);
-        setScanningHint('QR Code detected! Processing...');
-        handleQRScan(decodedText);
-        closeCamera();
-      },
-      (errorMessage) => {
-        // Handle scan error
-        console.log('🔍 HTML5 scanning... (no QR detected yet)');
-        setScanAttempts(prev => prev + 1);
-        setScannerSwitchAttempts(prev => prev + 1);
-        
-        // Auto-adjust settings based on scan attempts
-        handleScanAttempts();
-        
-        // Switch to ZXing if HTML5 fails after many attempts
-        if (scannerSwitchAttempts > 30 && currentScanner === 'html5') {
-          console.log('🔄 Switching to ZXing scanner...');
-          setCurrentScanner('zxing');
-          setScannerSwitchAttempts(0);
-          setScanAttempts(0);
-          stopScanner();
-          setTimeout(() => {
-            startZxingScanner();
-          }, 500);
-        }
-      }
-    ).then(() => {
-      console.log('✅ HTML5 Scanner started successfully');
-    }).catch((err) => {
-      console.error('❌ Failed to start HTML5 scanner:', err);
-      // Fallback to ZXing
-      setCurrentScanner('zxing');
-      startZxingScanner();
-    });
+    startZxingScanner();
   };
 
   const startZxingScanner = () => {
-    console.log('📱 Starting ZXing QR Scanner...');
+    console.log('📱 Starting Enhanced ZXing QR Scanner...');
     
     codeReader.current = new BrowserMultiFormatReader();
     
-    // Enhanced camera constraints for better focus
+    // Enhanced camera constraints for all QR code types
     const constraints = {
       video: {
         facingMode: 'environment',
@@ -297,7 +237,11 @@ function App() {
         frameRate: { ideal: 30, min: 15 },
         focusMode: 'continuous',
         exposureMode: 'continuous',
-        whiteBalanceMode: 'continuous'
+        whiteBalanceMode: 'continuous',
+        brightness: { ideal: 0.5 },
+        contrast: { ideal: 1.0 },
+        saturation: { ideal: 1.0 },
+        sharpness: { ideal: 1.0 }
       }
     };
     
@@ -307,11 +251,18 @@ function App() {
         videoRef.current.srcObject = stream;
       }
       
-      // Then start the scanner
+      // Enhanced ZXing configuration for all QR types
+      const hints = new Map();
+      hints.set(2, true); // Enable all barcode formats
+      hints.set(3, true); // Enable all QR code formats
+      hints.set(4, true); // Enable all data matrix formats
+      
+      // Then start the scanner with enhanced hints
       codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
         if (result) {
           console.log('🎯 QR Code detected by ZXing!');
           console.log('📄 QR Data:', result.getText());
+          console.log('📊 Format:', result.getFormat());
           setScanningHint('QR Code detected! Processing...');
           handleQRScan(result.getText());
           closeCamera();
@@ -323,19 +274,18 @@ function App() {
           // Auto-adjust settings based on scan attempts
           handleScanAttempts();
           
-          // Switch to HTML5 if ZXing fails after many attempts
-          if (scannerSwitchAttempts > 30 && currentScanner === 'zxing') {
-            console.log('🔄 Switching to HTML5 scanner...');
-            setCurrentScanner('html5');
+          // Restart scanner if too many attempts
+          if (scannerSwitchAttempts > 50) {
+            console.log('🔄 Restarting ZXing scanner...');
             setScannerSwitchAttempts(0);
             setScanAttempts(0);
             stopScanner();
             setTimeout(() => {
-              startHtml5Scanner();
-            }, 500);
+              startZxingScanner();
+            }, 1000);
           }
         }
-      });
+      }, hints);
     }).catch(err => {
       console.error('❌ Failed to get camera stream:', err);
       // Try with basic constraints
@@ -355,7 +305,7 @@ function App() {
       });
     });
     
-    console.log('✅ ZXing Scanner started successfully');
+    console.log('✅ Enhanced ZXing Scanner started successfully');
   };
 
   const handleScanAttempts = () => {
@@ -382,7 +332,7 @@ function App() {
       adjustContrast(1.2);
       setScanningHint('Trying different approach...');
     } else if (scanAttempts < 5) {
-      setScanningHint(`Scanning with ${currentScanner.toUpperCase()}... Position QR code clearly`);
+      setScanningHint('Scanning with ZXing... Position QR code clearly');
     } else if (scanAttempts < 10) {
       setScanningHint('Try adjusting distance or angle');
     } else if (scanAttempts < 15) {
@@ -395,18 +345,9 @@ function App() {
   const stopScanner = () => {
     console.log('⏹️ Stopping scanner...');
     if (codeReader.current) {
-      if (currentScanner === 'html5') {
-        codeReader.current.stop().then(() => {
-          console.log('✅ HTML5 Scanner stopped');
-          codeReader.current = null;
-        }).catch((err) => {
-          console.error('❌ Error stopping HTML5 scanner:', err);
-        });
-      } else {
-        codeReader.current.reset();
-        console.log('✅ ZXing Scanner stopped');
-        codeReader.current = null;
-      }
+      codeReader.current.reset();
+      console.log('✅ ZXing Scanner stopped');
+      codeReader.current = null;
     }
   };
 
@@ -627,23 +568,16 @@ function App() {
                 <div className="p-4 sm:p-6">
                   <div className="relative">
                     {/* QR Scanner Container for HTML5 */}
-                    {currentScanner === 'html5' && (
-                      <div 
-                        id="qr-reader"
-                        className="rounded-lg transition-all duration-300 h-80 sm:h-96 w-full"
-                      />
-                    )}
+                    {/* Removed HTML5 scanner container */}
                     
                     {/* Video element for ZXing */}
-                    {currentScanner === 'zxing' && (
-                      <video 
-                        ref={videoRef} 
-                        className="rounded-lg object-cover bg-black transition-all duration-300 h-80 sm:h-96 w-full"
-                        autoPlay={true} 
-                        muted={true} 
-                        playsInline={true}
-                      />
-                    )}
+                    <video 
+                      ref={videoRef} 
+                      className="rounded-lg object-cover bg-black transition-all duration-300 h-80 sm:h-96 w-full"
+                      autoPlay={true} 
+                      muted={true} 
+                      playsInline={true}
+                    />
 
                     {/* QR Scanning Frame */}
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -726,7 +660,7 @@ function App() {
 
                     {/* Scanner Type Indicator */}
                     <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-xs">
-                      Scanner: {currentScanner.toUpperCase()}
+                      Scanner: ZXing
                     </div>
                   </div>
                 </div>
