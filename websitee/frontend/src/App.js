@@ -78,6 +78,8 @@ function App() {
   const [userCookies, setUserCookies] = useState([]);
   const [showAddUserButton, setShowAddUserButton] = useState(false);
   const dateTapCountRef = useRef(0);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [scanningHint, setScanningHint] = useState('');
 
   // Load users from Supabase on mount
   useEffect(() => {
@@ -87,15 +89,18 @@ function App() {
         const response = await fetch('/api/users-for-frontend');
         if (response.ok) {
           const supabaseUsers = await response.json();
+          console.log('API returned users:', supabaseUsers);
           // Decrypt passwords for each user
           const decryptedUsers = supabaseUsers.map(user => ({
             ...user,
             password: decryptData(user.password) // Decrypt the password for CAMU authentication
           }));
+          console.log('Loaded users from API (after decrypt):', decryptedUsers);
           setUsers(decryptedUsers);
 
           // Fetch a unique cookie for each user in parallel
           const cookies = await Promise.all(decryptedUsers.map(user => getFreshCookieForUser(user)));
+          console.log('Fetched cookies:', cookies.length, cookies);
           setUserCookies(cookies);
         } else {
           console.error('❌ Failed to load users from Supabase');
@@ -189,14 +194,19 @@ function App() {
   const openCamera = () => {
     console.log('📷 Opening camera...');
     setIsCameraOpen(true);
+    setIsMinimized(false);
     setAttendanceResults([]);
+    setScanningHint('Position QR code within the frame');
     setTimeout(() => {
       // Request high-res video for better QR detection
       const constraints = {
         video: {
           facingMode: 'environment',
           width: { ideal: 1920 },
-          height: { ideal: 1080 }
+          height: { ideal: 1080 },
+          focusMode: 'continuous',
+          exposureMode: 'continuous',
+          whiteBalanceMode: 'continuous'
         }
       };
       navigator.mediaDevices.getUserMedia(constraints).then(stream => {
@@ -206,7 +216,13 @@ function App() {
         startScanner();
       }).catch(err => {
         console.error('Camera error:', err);
-        startScanner(); // fallback
+        // Fallback to basic constraints
+        navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+          }
+          startScanner();
+        });
       });
     }, 300);
   };
@@ -231,10 +247,12 @@ function App() {
       if (result) {
         console.log('🎯 QR Code detected!');
         console.log('📄 QR Data:', result.getText());
+        setScanningHint('QR Code detected! Processing...');
         handleQRScan(result.getText());
         closeCamera();
       } else if (err) {
         console.log('🔍 Scanning... (no QR detected yet)');
+        setScanningHint('Scanning... Position QR code clearly');
       }
     });
     
@@ -449,33 +467,60 @@ function App() {
 
             {/* QR Scanner - Above Today's Schedule */}
             {isCameraOpen && (
-              <div className="bg-black rounded-lg shadow-2xl mb-6">
+              <div className={`bg-black rounded-lg shadow-2xl mb-6 transition-all duration-300 ${
+                isMinimized ? 'w-64 h-48' : 'w-full'
+              }`}>
                 <div className="p-4 sm:p-6">
                   <div className="relative">
                     <video 
                       ref={videoRef} 
-                      className="w-full h-80 sm:h-96 rounded-lg object-cover bg-black" 
+                      className={`rounded-lg object-cover bg-black transition-all duration-300 ${
+                        isMinimized ? 'h-32' : 'h-80 sm:h-96 w-full'
+                      }`}
                       autoPlay={true} 
                       muted={true} 
                       playsInline={true}
                     />
                     
                     {/* QR Scanning Frame */}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="relative w-full h-full">
-                        {/* Red dotted border with L-shaped corners */}
-                        <div className="absolute inset-4 border-2 border-red-500 border-dashed">
-                          {/* L-shaped corners */}
-                          <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-red-500"></div>
-                          <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-red-500"></div>
-                          <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-red-500"></div>
-                          <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-red-500"></div>
+                    {!isMinimized && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="relative w-full h-full">
+                          {/* Red dotted border with L-shaped corners */}
+                          <div className="absolute inset-4 border-2 border-red-500 border-dashed">
+                            {/* L-shaped corners */}
+                            <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-red-500"></div>
+                            <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-red-500"></div>
+                            <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-red-500"></div>
+                            <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-red-500"></div>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* Scanning Hint */}
+                    {!isMinimized && scanningHint && (
+                      <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-2 rounded-lg text-sm">
+                        {scanningHint}
+                      </div>
+                    )}
 
                     {/* Camera Controls */}
                     <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
+                      {/* Minimize/Maximize Button */}
+                      <button
+                        onClick={() => setIsMinimized(!isMinimized)}
+                        className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-600 transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                          {isMinimized ? (
+                            <path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 11-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12z" clipRule="evenodd" />
+                          ) : (
+                            <path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 11-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12z" clipRule="evenodd" />
+                          )}
+                        </svg>
+                      </button>
+
                       {/* Zoom In Button */}
                       <button
                         onClick={handleZoomIn}
@@ -507,7 +552,7 @@ function App() {
                     </div>
 
                     {/* Flash Button */}
-                    <div className="absolute bottom-4 right-4">
+                    <div className="absolute bottom-4 left-4">
                       <button
                         onClick={toggleFlash}
                         className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-colors ${
@@ -516,6 +561,18 @@ function App() {
                       >
                         <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {/* Close Button */}
+                    <div className="absolute top-4 right-4">
+                      <button
+                        onClick={closeCamera}
+                        className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center shadow-lg hover:bg-red-600 transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
                         </svg>
                       </button>
                     </div>
