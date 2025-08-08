@@ -143,11 +143,11 @@ function App() {
 
   // Cleanup camera on unmount
   useEffect(() => {
+    const videoElement = videoRef.current;
     return () => {
       if (codeReader.current) {
         codeReader.current.reset();
       }
-      const videoElement = videoRef.current;
       if (videoElement && videoElement.srcObject) {
         const stream = videoElement.srcObject;
         const tracks = stream.getTracks();
