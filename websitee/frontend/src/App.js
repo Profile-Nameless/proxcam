@@ -314,32 +314,7 @@ function App() {
 
   // Removed BarcodeDetector path for simplicity
 
-  // Last-resort: upload a video frame to backend for server-side decoding
-  const tryServerSideDecodeOnce = async () => {
-    if (!videoRef.current) return null;
-    try {
-      const canvas = document.createElement('canvas');
-      const video = videoRef.current;
-      const w = video.videoWidth;
-      const h = video.videoHeight;
-      if (!w || !h) return null;
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, w, h);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      const res = await fetch('/api/decode-qr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: dataUrl })
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data?.text || null;
-    } catch {
-      return null;
-    }
-  };
+  // Removed server-side decode path for now
 
   // Removed CDN ZXing core path (using worker instead)
 
