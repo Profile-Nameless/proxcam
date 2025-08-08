@@ -236,25 +236,14 @@ function App() {
     codeReader.current = new Html5Qrcode("qr-reader");
     
     const config = {
-      fps: 15,
-      qrbox: { width: 300, height: 300 },
+      fps: 10,
+      qrbox: { width: 250, height: 250 },
       aspectRatio: 1.0,
-      supportedScanTypes: ['CAMERA'],
-      disableFlip: false,
-      experimentalFeatures: {
-        useBarCodeDetectorIfSupported: true
-      }
+      disableFlip: false
     };
     
     codeReader.current.start(
-      { 
-        facingMode: "environment",
-        focusMode: "continuous",
-        exposureMode: "continuous",
-        whiteBalanceMode: "continuous",
-        width: { ideal: 1920, min: 1280 },
-        height: { ideal: 1080, min: 720 }
-      },
+      { facingMode: "environment" },
       config,
       (decodedText, decodedResult) => {
         console.log('🎯 QR Code detected by HTML5!');
@@ -308,41 +297,62 @@ function App() {
         frameRate: { ideal: 30, min: 15 },
         focusMode: 'continuous',
         exposureMode: 'continuous',
-        whiteBalanceMode: 'continuous',
-        brightness: { ideal: 0.5 },
-        contrast: { ideal: 1.0 },
-        saturation: { ideal: 1.0 },
-        sharpness: { ideal: 1.0 }
+        whiteBalanceMode: 'continuous'
       }
     };
     
-    codeReader.current.decodeFromConstraints(constraints, videoRef.current, (result, err) => {
-      if (result) {
-        console.log('🎯 QR Code detected by ZXing!');
-        console.log('📄 QR Data:', result.getText());
-        setScanningHint('QR Code detected! Processing...');
-        handleQRScan(result.getText());
-        closeCamera();
-      } else if (err) {
-        console.log('🔍 ZXing scanning... (no QR detected yet)');
-        setScanAttempts(prev => prev + 1);
-        setScannerSwitchAttempts(prev => prev + 1);
-        
-        // Auto-adjust settings based on scan attempts
-        handleScanAttempts();
-        
-        // Switch to HTML5 if ZXing fails after many attempts
-        if (scannerSwitchAttempts > 30 && currentScanner === 'zxing') {
-          console.log('🔄 Switching to HTML5 scanner...');
-          setCurrentScanner('html5');
-          setScannerSwitchAttempts(0);
-          setScanAttempts(0);
-          stopScanner();
-          setTimeout(() => {
-            startHtml5Scanner();
-          }, 500);
-        }
+    // First get the video stream
+    navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
       }
+      
+      // Then start the scanner
+      codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
+        if (result) {
+          console.log('🎯 QR Code detected by ZXing!');
+          console.log('📄 QR Data:', result.getText());
+          setScanningHint('QR Code detected! Processing...');
+          handleQRScan(result.getText());
+          closeCamera();
+        } else if (err) {
+          console.log('🔍 ZXing scanning... (no QR detected yet)');
+          setScanAttempts(prev => prev + 1);
+          setScannerSwitchAttempts(prev => prev + 1);
+          
+          // Auto-adjust settings based on scan attempts
+          handleScanAttempts();
+          
+          // Switch to HTML5 if ZXing fails after many attempts
+          if (scannerSwitchAttempts > 30 && currentScanner === 'zxing') {
+            console.log('🔄 Switching to HTML5 scanner...');
+            setCurrentScanner('html5');
+            setScannerSwitchAttempts(0);
+            setScanAttempts(0);
+            stopScanner();
+            setTimeout(() => {
+              startHtml5Scanner();
+            }, 500);
+          }
+        }
+      });
+    }).catch(err => {
+      console.error('❌ Failed to get camera stream:', err);
+      // Try with basic constraints
+      navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
+          if (result) {
+            console.log('🎯 QR Code detected by ZXing!');
+            console.log('📄 QR Data:', result.getText());
+            setScanningHint('QR Code detected! Processing...');
+            handleQRScan(result.getText());
+            closeCamera();
+          }
+        });
+      });
     });
     
     console.log('✅ ZXing Scanner started successfully');
