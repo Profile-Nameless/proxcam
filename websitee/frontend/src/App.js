@@ -77,7 +77,7 @@ function App() {
   const [userCookies, setUserCookies] = useState([]);
   const [showAddUserButton, setShowAddUserButton] = useState(false);
   const dateTapCountRef = useRef(0);
-  const [scanningHint, setScanningHint] = useState('');
+  const [, setScanningHint] = useState('');
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
@@ -252,13 +252,7 @@ function App() {
     navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play().then(() => {
-          console.log('✅ Video stream started successfully');
-          setScanningHint('Camera ready. Position QR code in frame');
-        }).catch(err => {
-          console.error('❌ Video play failed:', err);
-          setScanningHint('Camera failed to start');
-        });
+        videoRef.current.play().catch(() => {});
       }
       // Start the scanner
       codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
@@ -280,19 +274,12 @@ function App() {
       });
     }).catch(err => {
       console.error('❌ Failed to get camera stream:', err);
-      setScanningHint('Camera access failed. Trying basic mode...');
       
       // Try with basic constraints
       navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          videoRef.current.play().then(() => {
-            console.log('✅ Basic video stream started');
-            setScanningHint('Camera ready (basic mode)');
-          }).catch(err => {
-            console.error('❌ Basic video play failed:', err);
-            setScanningHint('Camera failed to start');
-          });
+          videoRef.current.play().catch(() => {});
         }
         codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
           if (result) {
@@ -305,7 +292,6 @@ function App() {
         });
       }).catch(fallbackErr => {
         console.error('❌ Camera access completely failed:', fallbackErr);
-        setScanningHint('Camera access failed. Please check permissions.');
       });
     });
     
@@ -664,12 +650,7 @@ function App() {
                       </div>
                     </div>
 
-                    {/* Scanning Hint */}
-                    {scanningHint && (
-                      <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-2 rounded-lg text-sm">
-                        {scanningHint.replace('Try adjusting distance or angle','').replace('Try zooming in or using flash','').replace('QR may be too small or dim. Try getting closer','').trim()}
-                      </div>
-                    )}
+                    {/* Scanning hint removed */}
 
                     {/* Zoom Controls */}
                     <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
