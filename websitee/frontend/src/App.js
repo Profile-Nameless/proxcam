@@ -1,3 +1,4 @@
+// Force redeploy - Latest QR scanner with enhanced focus capabilities
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5Qrcode, Html5QrcodeScanType } from 'html5-qrcode';
 import { BrowserMultiFormatReader } from '@zxing/browser';
