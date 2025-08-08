@@ -267,12 +267,14 @@ function App() {
           setScanningHint('QR Code detected! Processing...');
           handleQRScan(result.getText());
           closeCamera();
-        } else {
+        } else if (err && err.name !== 'NotFoundException') {
           // keep scanning; ignore NotFoundException
           // Periodically try a high-res still decoded in a Web Worker (WASM)
           if (videoRef.current && performance.now() % 1500 < 50) {
             tryDecodeWithWorkerOnce();
           }
+        } else {
+          // NotFoundException: continue
         }
       });
     }).catch(err => {
@@ -309,30 +311,7 @@ function App() {
     console.log('✅ ZXing Scanner started');
   };
 
-  const startBarcodeDetectorFallback = () => {
-    try {
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-      barcodeDetectorRef.current = detector;
-      const detect = async () => {
-        if (!isCameraOpen || !videoRef.current) return;
-        try {
-          const codes = await detector.detect(videoRef.current);
-          if (codes && codes.length > 0 && codes[0].rawValue) {
-            console.log('🎯 QR Code detected by BarcodeDetector!');
-            setScanningHint('QR Code detected! Processing...');
-            setCameraStatus('scanning');
-            handleQRScan(codes[0].rawValue);
-            closeCamera();
-            return;
-          }
-        } catch {}
-        requestAnimationFrame(detect);
-      };
-      requestAnimationFrame(detect);
-    } catch (e) {
-      console.warn('BarcodeDetector not available:', e);
-    }
-  };
+  // Removed BarcodeDetector path for simplicity
 
   // Last-resort: upload a video frame to backend for server-side decoding
   const tryServerSideDecodeOnce = async () => {
@@ -361,132 +340,9 @@ function App() {
     }
   };
 
-  // Load ZXing core from CDN lazily
-  const loadZXingCore = async () => {
-    if (zxingCoreRef.current) return zxingCoreRef.current;
-    try {
-      const mod = await import('https://unpkg.com/@zxing/library@latest?module');
-      zxingCoreRef.current = mod;
-      return mod;
-    } catch (e) {
-      console.warn('Failed to load ZXing core from CDN', e);
-      return null;
-    }
-  };
+  // Removed CDN ZXing core path (using worker instead)
 
-  // Try decoding current frame with ZXing core (handles skew/contrast)
-  const tryZXingCoreDecodeOnce = async () => {
-    const core = await loadZXingCore();
-    if (!core || !videoRef.current) return null;
-    const {
-      RGBLuminanceSource,
-      BinaryBitmap,
-      HybridBinarizer,
-      MultiFormatReader,
-      DecodeHintType,
-      BarcodeFormat
-    } = core;
-    
-    const getFrameImageData = (rotateDeg = 0, enhance = true, crop = true) => {
-      const video = videoRef.current;
-      const vw = video.videoWidth;
-      const vh = video.videoHeight;
-      if (!vw || !vh) return null;
-      const side = crop ? Math.floor(Math.min(vw, vh) * 0.8) : Math.min(vw, vh);
-      const sx = Math.floor((vw - side) / 2);
-      const sy = Math.floor((vh - side) / 2);
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (rotateDeg % 180 === 0) {
-        canvas.width = side; canvas.height = side;
-      } else {
-        canvas.width = side; canvas.height = side;
-      }
-      ctx.save();
-      // Translate to center and rotate, then draw ROI
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((rotateDeg * Math.PI) / 180);
-      ctx.drawImage(video, sx, sy, side, side, -side / 2, -side / 2, side, side);
-      ctx.restore();
-      let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      if (enhance) {
-        // simple contrast stretch on grayscale
-        let min = 255, max = 0;
-        for (let i = 0; i < imgData.data.length; i += 4) {
-          const r = imgData.data[i], g = imgData.data[i + 1], b = imgData.data[i + 2];
-          const y = (r * 0.299 + g * 0.587 + b * 0.114) | 0;
-          if (y < min) min = y; if (y > max) max = y;
-          imgData.data[i] = imgData.data[i + 1] = imgData.data[i + 2] = y;
-        }
-        const span = Math.max(1, max - min);
-        for (let i = 0; i < imgData.data.length; i += 4) {
-          const v = ((imgData.data[i] - min) * 255) / span;
-          const vv = v | 0;
-          imgData.data[i] = imgData.data[i + 1] = imgData.data[i + 2] = vv;
-        }
-      }
-      return imgData;
-    };
-
-    const tryDecode = (imgData) => {
-      const luminance = new RGBLuminanceSource(imgData.data, imgData.width, imgData.height);
-      const binarizer = new HybridBinarizer(luminance);
-      const bitmap = new BinaryBitmap(binarizer);
-      const hints = new Map();
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
-      hints.set(DecodeHintType.TRY_HARDER, true);
-      hints.set(DecodeHintType.ALSO_INVERTED, true);
-      const reader = new MultiFormatReader();
-      reader.setHints(hints);
-      const result = reader.decode(bitmap);
-      return result?.getText?.() || result?.text || null;
-    };
-
-    const rotations = [0, 90, 180, 270];
-    for (const rot of rotations) {
-      try {
-        const img = getFrameImageData(rot, true, true);
-        if (!img) continue;
-        const text = tryDecode(img);
-        if (text) return text;
-      } catch {}
-    }
-    return null;
-  };
-
-  const handleScanAttempts = () => {
-    // Auto-adjust settings based on scan attempts
-    if (scanAttempts === 5) {
-      // First adjustment: increase brightness
-      adjustBrightness(1.5);
-      setScanningHint('Auto-adjusting brightness...');
-    } else if (scanAttempts === 10) {
-      // Second adjustment: increase contrast
-      adjustContrast(1.5);
-      setScanningHint('Auto-adjusting contrast...');
-    } else if (scanAttempts === 15) {
-      // Third adjustment: maximum brightness
-      adjustBrightness(2.0);
-      setScanningHint('Auto-adjusting for dim QR...');
-    } else if (scanAttempts === 20) {
-      // Fourth adjustment: maximum contrast
-      adjustContrast(2.0);
-      setScanningHint('Auto-adjusting for small QR...');
-    } else if (scanAttempts === 25) {
-      // Fifth adjustment: reset and try different approach
-      adjustBrightness(0.8);
-      adjustContrast(1.2);
-      setScanningHint('Trying different approach...');
-    } else if (scanAttempts < 5) {
-      setScanningHint('Scanning with ZXing... Position QR code clearly');
-    } else if (scanAttempts < 10) {
-      setScanningHint('Try adjusting distance or angle');
-    } else if (scanAttempts < 15) {
-      setScanningHint('Try zooming in or using flash');
-    } else {
-      setScanningHint('QR may be too small or dim. Try getting closer');
-    }
-  };
+  // Removed auto-adjust path
 
   const stopScanner = () => {
     console.log('⏹️ Stopping scanner...');
@@ -564,64 +420,7 @@ function App() {
     } catch {}
   };
 
-  const toggleFlash = async () => {
-    console.log('⚡ Toggling flash...');
-    try {
-      const stream = videoRef.current?.srcObject;
-      const track = stream?.getVideoTracks?.()[0];
-      const capabilities = track?.getCapabilities?.();
-      if (capabilities && capabilities.torch) {
-        const next = !isFlashOn;
-        await track.applyConstraints({ advanced: [{ torch: next }] });
-        setIsFlashOn(next);
-        return;
-      }
-    } catch {}
-    // Fallback UI toggle if no torch capability
-    setIsFlashOn((v) => !v);
-  };
-
-  const handleZoomIn = () => {
-    setZoomLevel(prev => {
-      const newZoom = Math.min(prev + 0.1, 3);
-      applyCameraZoom(newZoom);
-      return newZoom;
-    });
-  };
-
-  const handleZoomOut = () => {
-    setZoomLevel(prev => {
-      const newZoom = Math.max(prev - 0.1, 1);
-      applyCameraZoom(newZoom);
-      return newZoom;
-    });
-  };
-
-  const applyCameraZoom = (zoom) => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const [track] = videoRef.current.srcObject.getVideoTracks();
-      if (track && typeof track.getCapabilities === 'function') {
-        const capabilities = track.getCapabilities();
-        if (capabilities.zoom) {
-          track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
-        }
-      }
-    }
-  };
-
-  const adjustBrightness = (value) => {
-    setBrightness(value);
-    if (videoRef.current) {
-      videoRef.current.style.filter = `brightness(${value}) contrast(${contrast})`;
-    }
-  };
-
-  const adjustContrast = (value) => {
-    setContrast(value);
-    if (videoRef.current) {
-      videoRef.current.style.filter = `brightness(${brightness}) contrast(${value})`;
-    }
-  };
+  // Removed flash/zoom/filters
 
   // Helper: fetch with timeout and no-store caching
   const fetchWithTimeout = async (resource, options = {}, timeoutMs = 8000) => {
@@ -857,51 +656,7 @@ function App() {
                       </div>
                     )}
 
-                    {/* Enhanced Camera Controls */}
-                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
-                      {/* Zoom In Button */}
-                      <button
-                        onClick={handleZoomIn}
-                        className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-black text-sm font-bold ml-1">+</span>
-                      </button>
-                      
-                      {/* Zoom Level Indicator */}
-                      <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
-                        {Math.round(zoomLevel * 100)}%
-                      </div>
-                      
-                      {/* Zoom Out Button */}
-                      <button
-                        onClick={handleZoomOut}
-                        className="w-12 h-12 bg-gray-400 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-500 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-black text-sm font-bold ml-1">-</span>
-                      </button>
-                    </div>
-
-                    {/* Flash Button */}
-                    <div className="absolute bottom-4 left-4">
-                      <button
-                        onClick={toggleFlash}
-                        className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-colors ${
-                          isFlashOn ? 'bg-yellow-400 hover:bg-yellow-500' : 'bg-gray-400 hover:bg-gray-500'
-                        }`}
-                      >
-                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
-                        </svg>
-                      </button>
-                    </div>
+                    {/* Minimal UI controls removed for stability */}
 
                     {/* Close Button */}
                     <div className="absolute top-4 right-4">
@@ -915,20 +670,8 @@ function App() {
                       </button>
                     </div>
 
-                    {/* Scanner Type Indicator */}
-                    <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-xs">
-                      Scanner: ZXing
-                    </div>
-
-                    {/* Camera Status Indicator */}
-                    <div className={`absolute top-4 right-16 px-3 py-1 rounded-lg text-xs ${
-                      cameraStatus === 'active' ? 'bg-green-500 text-white' :
-                      cameraStatus === 'error' ? 'bg-red-500 text-white' :
-                      cameraStatus === 'scanning' ? 'bg-blue-500 text-white' :
-                      'bg-yellow-500 text-white'
-                    }`}>
-                      Camera: {cameraStatus}
-                    </div>
+                    {/* Scanner Indicator */}
+                    <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-xs">Scanner</div>
                   </div>
                 </div>
               </div>
