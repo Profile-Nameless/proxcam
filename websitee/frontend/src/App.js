@@ -80,7 +80,6 @@ function App() {
   const [userCookies, setUserCookies] = useState([]);
   const [showAddUserButton, setShowAddUserButton] = useState(false);
   const dateTapCountRef = useRef(0);
-  const [isMinimized, setIsMinimized] = useState(false);
   const [scanningHint, setScanningHint] = useState('');
   const [scanningMode, setScanningMode] = useState('auto');
   const [brightness, setBrightness] = useState(1);
@@ -448,15 +447,6 @@ function App() {
     if (videoRef.current) {
       videoRef.current.style.filter = `brightness(${brightness}) contrast(${value})`;
     }
-  };
-
-  const switchScanningMode = () => {
-    const modes = ['auto', 'enhanced', 'high-sensitivity'];
-    const currentIndex = modes.indexOf(scanningMode);
-    const nextMode = modes[(currentIndex + 1) % modes.length];
-    setScanningMode(nextMode);
-    setScanAttempts(0);
-    setScanningHint(`Switched to ${nextMode} mode`);
   };
 
   const handleQRScan = async (qrData) => {
