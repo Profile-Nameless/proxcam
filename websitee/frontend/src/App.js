@@ -1,6 +1,6 @@
 // Force redeploy - Latest QR scanner with enhanced focus capabilities
 import React, { useState, useEffect, useRef } from 'react';
-import { Html5Qrcode, Html5QrcodeScanType } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import './App.css';
 
@@ -81,7 +81,6 @@ function App() {
   const [showAddUserButton, setShowAddUserButton] = useState(false);
   const dateTapCountRef = useRef(0);
   const [scanningHint, setScanningHint] = useState('');
-  const [scanningMode, setScanningMode] = useState('auto');
   const [brightness, setBrightness] = useState(1);
   const [contrast, setContrast] = useState(1);
   const [scanAttempts, setScanAttempts] = useState(0);
@@ -240,7 +239,7 @@ function App() {
       fps: 15,
       qrbox: { width: 300, height: 300 },
       aspectRatio: 1.0,
-      supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+      supportedScanTypes: ['CAMERA'],
       disableFlip: false,
       experimentalFeatures: {
         useBarCodeDetectorIfSupported: true
