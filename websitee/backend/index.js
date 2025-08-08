@@ -1,5 +1,8 @@
 const express = require('express');
 const axios = require('axios');
+const http = require('http');
+const https = require('https');
+const FormData = require('form-data');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const { createClient } = require('@supabase/supabase-js');
@@ -33,6 +36,23 @@ const btoa = (str) => {
   return Buffer.from(str, 'utf8').toString('base64');
 };
 
+// Base64 decode function (Node.js equivalent of atob)
+const atobNode = (str) => {
+  return Buffer.from(str, 'base64').toString('utf8');
+};
+
+// Optimize HTTP agents for keep-alive
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+
+// Axios instance with sane defaults
+const api = axios.create({
+  timeout: 8000,
+  httpAgent,
+  httpsAgent,
+  validateStatus: () => true,
+});
+
 // Helper: MyCamu login
 async function myCamuLogin(email, password) {
   const loginUrl = 'https://student.bennetterp.camu.in/login/validate';
@@ -48,8 +68,31 @@ async function myCamuLogin(email, password) {
     'Origin': 'https://student.bennetterp.camu.in',
     'Referer': 'https://student.bennetterp.camu.in/login',
   };
-  const response = await axios.post(loginUrl, payload, { headers, withCredentials: true });
+  const response = await api.post(loginUrl, payload, { headers, withCredentials: true });
+  if (!response || response.status >= 500) {
+    throw new Error('Login service unavailable');
+  }
   return response;
+}
+
+// In-memory cookie cache
+const cookieCache = new Map(); // email -> { cookie, updatedAt: number }
+const COOKIE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+async function getCookieForUser(email, password) {
+  const now = Date.now();
+  const cached = cookieCache.get(email);
+  if (cached && now - cached.updatedAt < COOKIE_TTL_MS) {
+    return cached.cookie;
+  }
+  const response = await myCamuLogin(email, password);
+  const setCookie = response.headers['set-cookie'];
+  if (!setCookie) throw new Error('No session cookie received');
+  const connectSid = setCookie.find((c) => c.startsWith('connect.sid='));
+  if (!connectSid) throw new Error('No connect.sid cookie found');
+  const cookie = connectSid.split(';')[0];
+  cookieCache.set(email, { cookie, updatedAt: now });
+  return cookie;
 }
 
 // POST /login: Get name and StuID
@@ -84,10 +127,8 @@ app.post('/api/login', async (req, res) => {
         // Don't fail the login if Supabase fails, just log it
       } else {
         console.log('User data stored in Supabase:', supabaseData);
-        console.log('🔐 Password encryption test:');
-        console.log('  Original password:', password);
-        console.log('  Encrypted password:', btoa(encodeURIComponent(password)));
-        console.log('  Decryption test:', decodeURIComponent(atob(btoa(encodeURIComponent(password)))));
+        // Minimal log to avoid atob in Node env
+        console.log('🔐 Password stored (encrypted) for', email);
       }
     } catch (supabaseErr) {
       console.error('Error storing in Supabase:', supabaseErr);
@@ -102,18 +143,9 @@ app.post('/api/login', async (req, res) => {
 // POST /get-cookie: Get session cookie
 app.post('/api/get-cookie', async (req, res) => {
   const { email, password } = req.body;
-  console.log('🍪 Cookie request received:');
-  console.log(`  Email: ${email}`);
-  console.log(`  Password: ${password}`);
-  
   try {
-    const response = await myCamuLogin(email, password);
-    const setCookie = response.headers['set-cookie'];
-    if (!setCookie) return res.status(400).json({ error: 'No session cookie received' });
-    // Find connect.sid cookie
-    const connectSid = setCookie.find(c => c.startsWith('connect.sid='));
-    if (!connectSid) return res.status(400).json({ error: 'No connect.sid cookie found' });
-    res.json({ cookie: connectSid.split(';')[0] });
+    const cookie = await getCookieForUser(email, password);
+    res.json({ cookie });
   } catch (err) {
     res.status(401).json({ error: 'Login failed', details: err.message });
   }
@@ -152,25 +184,118 @@ app.get('/api/users-for-frontend', async (req, res) => {
     }
 
     // Convert to frontend format
-    const frontendUsers = data.map(user => {
-      console.log(`🔐 Backend sending user: ${user.name}`);
-      console.log(`  Email: ${user.email}`);
-      console.log(`  Encrypted password: ${user.password_encrypted}`);
-      console.log(`  Student ID: ${user.stu_id}`);
-      
-      return {
+    const frontendUsers = data.map(user => ({
         id: Date.now() + Math.random(), // Generate unique ID
         email: user.email, // This is the actual email
         password: user.password_encrypted, // This is the encrypted password
         name: user.name,
         stuId: user.stu_id
-      };
-    });
+      }));
 
     console.log(`📤 Sending ${frontendUsers.length} users to frontend`);
     res.json(frontendUsers);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users', details: err.message });
+  }
+});
+
+// GET /users-and-cookies: return users with fresh cookies (fast parallel)
+app.get('/api/users-and-cookies', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('attendance_records')
+      .select('email, name, stu_id, password_encrypted, created_at')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: 'Failed to fetch users' });
+    }
+
+    // Decode password and fetch cookie concurrently
+    const results = await Promise.allSettled(
+      data.map(async (u) => {
+        const decodedPassword = decodeURIComponent(atobNode(u.password_encrypted));
+        const cookie = await getCookieForUser(u.email, decodedPassword);
+        return {
+          email: u.email,
+          name: u.name,
+          stuId: u.stu_id,
+          cookie,
+        };
+      })
+    );
+
+    const usersWithCookies = results
+      .map((r, i) => (r.status === 'fulfilled' ? r.value : { email: data[i].email, name: data[i].name, stuId: data[i].stu_id, cookie: null }))
+      .filter(Boolean);
+
+    res.json(usersWithCookies);
+  } catch (err) {
+    console.error('Failed to prepare users and cookies:', err);
+    res.status(500).json({ error: 'Failed to prepare users and cookies', details: err.message });
+  }
+});
+
+// POST /prewarm-cookies: optional manual trigger to refresh cookie cache
+app.post('/api/prewarm-cookies', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('attendance_records')
+      .select('email, password_encrypted');
+    if (error) return res.status(500).json({ error: 'Failed to read users' });
+    await Promise.allSettled(
+      (data || []).map(async (u) => {
+        const decodedPassword = decodeURIComponent(atobNode(u.password_encrypted));
+        await getCookieForUser(u.email, decodedPassword);
+      })
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to prewarm', details: e.message });
+  }
+});
+
+// POST /decode-qr: server-side decode for tough frames
+// Body: { imageBase64: string (DataURL or base64), mimeType?: string }
+app.post('/api/decode-qr', async (req, res) => {
+  try {
+    const { imageBase64, mimeType } = req.body || {};
+    if (!imageBase64) {
+      return res.status(400).json({ error: 'imageBase64 is required' });
+    }
+    // Support either DataURL or raw base64
+    let base64Data = imageBase64;
+    let contentType = mimeType || 'image/jpeg';
+    const dataUrlMatch = /^data:(.*?);base64,(.*)$/i.exec(imageBase64);
+    if (dataUrlMatch) {
+      contentType = dataUrlMatch[1] || contentType;
+      base64Data = dataUrlMatch[2];
+    }
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Use api.qrserver.com which returns JSON and has good tolerance
+    const form = new FormData();
+    form.append('file', buffer, { filename: 'frame.jpg', contentType });
+
+    const response = await api.post('https://api.qrserver.com/v1/read-qr-code/', form, {
+      headers: form.getHeaders(),
+      // Slightly longer timeout for remote service
+      timeout: 10000,
+      maxContentLength: 10 * 1024 * 1024,
+    });
+
+    if (!response || response.status >= 400) {
+      return res.status(502).json({ error: 'Remote decode failed', status: response?.status, body: response?.data });
+    }
+    const payload = response.data;
+    const text = payload?.[0]?.symbol?.[0]?.data || null;
+    if (!text) {
+      return res.status(404).json({ error: 'No QR found' });
+    }
+    return res.json({ text });
+  } catch (e) {
+    return res.status(500).json({ error: 'Decode error', details: e.message });
   }
 });
 
@@ -194,7 +319,11 @@ app.post('/api/mark-attendance', async (req, res) => {
       StuID: stuId,
       offQrCdEnbld: true,
     };
-    const response = await axios.post(url, payload, { headers });
+    const response = await api.post(url, payload, { headers });
+    if (!response) return res.status(500).json({ error: 'No response from CAMU' });
+    if (response.status >= 400) {
+      return res.status(response.status).json({ error: 'Attendance marking failed', details: response.statusText, body: response.data });
+    }
     res.json(response.data);
   } catch (err) {
     res.status(400).json({ error: 'Attendance marking failed', details: err.message });

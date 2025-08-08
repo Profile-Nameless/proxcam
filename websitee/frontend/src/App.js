@@ -1,6 +1,6 @@
 // Force redeploy - Latest QR scanner with enhanced focus capabilities
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserMultiFormatReader } from '@zxing/browser';
+import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } from '@zxing/browser';
 import './App.css';
 
 const timetable = [
@@ -75,6 +75,8 @@ function App() {
   const [isFlashOn, setIsFlashOn] = useState(false);
   const videoRef = useRef(null);
   const codeReader = useRef(null);
+  const barcodeDetectorRef = useRef(null);
+  const zxingCoreRef = useRef(null);
   const [showQRScannedPopup, setShowQRScannedPopup] = useState(false);
   const [userCookies, setUserCookies] = useState([]);
   const [showAddUserButton, setShowAddUserButton] = useState(false);
@@ -83,38 +85,48 @@ function App() {
   const [brightness, setBrightness] = useState(1);
   const [contrast, setContrast] = useState(1);
   const [scanAttempts, setScanAttempts] = useState(0);
+  const [cameraStatus, setCameraStatus] = useState('initializing');
   const [scannerSwitchAttempts, setScannerSwitchAttempts] = useState(0);
+  const [isProcessingScan, setIsProcessingScan] = useState(false);
+  const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
+  const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
 
-  // Load users from Supabase on mount
+  // Load users and cookies on mount (fast path)
   useEffect(() => {
-    console.log('🔄 Loading users from Supabase...');
-    const loadUsersFromSupabase = async () => {
+    console.log('🔄 Loading users and cookies...');
+    const loadFast = async () => {
       try {
-        const response = await fetch('/api/users-for-frontend');
-        if (response.ok) {
-          const supabaseUsers = await response.json();
-          console.log('API returned users:', supabaseUsers);
-          // Decrypt passwords for each user
-          const decryptedUsers = supabaseUsers.map(user => ({
-            ...user,
-            password: decryptData(user.password) // Decrypt the password for CAMU authentication
+        const fastRes = await fetch('/api/users-and-cookies', { cache: 'no-store' });
+        if (fastRes.ok) {
+          const data = await fastRes.json();
+          const fastUsers = data.map((u, idx) => ({
+            id: Date.now() + idx,
+            email: u.email,
+            name: u.name,
+            stuId: u.stuId,
+            password: ''
           }));
-          console.log('Loaded users from API (after decrypt):', decryptedUsers);
-          setUsers(decryptedUsers);
-
-          // Fetch a unique cookie for each user in parallel
-          const cookies = await Promise.all(decryptedUsers.map(user => getFreshCookieForUser(user)));
-          console.log('Fetched cookies:', cookies.length, cookies);
-          setUserCookies(cookies);
-        } else {
-          console.error('❌ Failed to load users from Supabase');
+          setUsers(fastUsers);
+          setUserCookies(data.map((u) => u.cookie));
+          return;
         }
+        console.warn('Fast path failed, falling back to users-for-frontend + get-cookie');
+        const response = await fetch('/api/users-for-frontend', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Failed users-for-frontend');
+        const supabaseUsers = await response.json();
+        const decryptedUsers = supabaseUsers.map(user => ({
+          ...user,
+          password: decryptData(user.password)
+        }));
+        setUsers(decryptedUsers);
+        const cookies = await Promise.all(decryptedUsers.map(user => getFreshCookieForUser(user)));
+        setUserCookies(cookies);
       } catch (error) {
         console.error('❌ Error loading users from Supabase:', error);
       }
     };
     
-    loadUsersFromSupabase();
+    loadFast();
   }, []);
 
   useEffect(() => {
@@ -126,6 +138,21 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Cleanup camera on unmount
+  useEffect(() => {
+    return () => {
+      if (codeReader.current) {
+        codeReader.current.reset();
+      }
+      const videoElement = videoRef.current;
+      if (videoElement && videoElement.srcObject) {
+        const stream = videoElement.srcObject;
+        const tracks = stream.getTracks();
+        tracks.forEach(track => track.stop());
+      }
+    };
   }, []);
 
   const addUser = async (email, password) => {
@@ -199,8 +226,9 @@ function App() {
     console.log('📷 Opening camera...');
     setIsCameraOpen(true);
     setAttendanceResults([]);
-    setScanningHint('Position QR code within the frame');
+    setScanningHint('Initializing camera...');
     setScanAttempts(0);
+    setCameraStatus('initializing');
     setTimeout(() => {
       startScanner();
     }, 300);
@@ -209,65 +237,91 @@ function App() {
   const closeCamera = () => {
     console.log('📷 Closing camera...');
     setIsCameraOpen(false);
+    setCameraStatus('closed');
     stopScanner();
   };
 
   const startScanner = () => {
     if (!videoRef.current) {
       console.error('❌ Video ref not available');
+      setScanningHint('Camera initialization failed');
+      setCameraStatus('error');
       return;
     }
     
     console.log('🔍 Initializing QR scanner...');
-    
+    setCameraStatus('starting');
     startZxingScanner();
   };
 
   const startZxingScanner = () => {
     console.log('📱 Starting Enhanced ZXing QR Scanner...');
     
-    codeReader.current = new BrowserMultiFormatReader();
+    // Proper ZXing hints focusing on QR with robustness
+    const formats = [BarcodeFormat.QR_CODE];
+    const hints = new Map();
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
+    hints.set(DecodeHintType.TRY_HARDER, true);
+    // Inverted helps with dark/bright projector backgrounds
+    hints.set(DecodeHintType.ALSO_INVERTED, true);
+
+    codeReader.current = new BrowserMultiFormatReader(hints);
     
-    // Enhanced camera constraints for all QR code types
+    // Simplified camera constraints to prevent black screen
     const constraints = {
       video: {
-        facingMode: 'environment',
-        width: { ideal: 1920, min: 1280 },
-        height: { ideal: 1080, min: 720 },
-        frameRate: { ideal: 30, min: 15 },
-        focusMode: 'continuous',
-        exposureMode: 'continuous',
-        whiteBalanceMode: 'continuous',
-        brightness: { ideal: 0.5 },
-        contrast: { ideal: 1.0 },
-        saturation: { ideal: 1.0 },
-        sharpness: { ideal: 1.0 }
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920, min: 640 },
+        height: { ideal: 1080, min: 480 },
+        frameRate: { ideal: 30, min: 15 }
       }
     };
     
     // First get the video stream
-    navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+    navigator.mediaDevices.getUserMedia(constraints).then(async (stream) => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Try to enable continuous focus/exposure where available
+        try {
+          const [track] = stream.getVideoTracks();
+          if (track && typeof track.getCapabilities === 'function') {
+            const capabilities = track.getCapabilities();
+            const advanced = [];
+            if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+              advanced.push({ focusMode: 'continuous' });
+            }
+            if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
+              advanced.push({ exposureMode: 'continuous' });
+            }
+            if (advanced.length) {
+              await track.applyConstraints({ advanced });
+            }
+          }
+        } catch {}
+
+        videoRef.current.play().then(() => {
+          console.log('✅ Video stream started successfully');
+          setCameraStatus('active');
+          setScanningHint('Camera ready. Position QR code in frame');
+        }).catch(err => {
+          console.error('❌ Video play failed:', err);
+          setCameraStatus('error');
+          setScanningHint('Camera failed to start');
+        });
       }
       
-      // Enhanced ZXing configuration for all QR types
-      const hints = new Map();
-      hints.set(2, true); // Enable all barcode formats
-      hints.set(3, true); // Enable all QR code formats
-      hints.set(4, true); // Enable all data matrix formats
-      
-      // Then start the scanner with enhanced hints
+      // Start the scanner
       codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
         if (result) {
           console.log('🎯 QR Code detected by ZXing!');
           console.log('📄 QR Data:', result.getText());
           console.log('📊 Format:', result.getFormat());
           setScanningHint('QR Code detected! Processing...');
+          setCameraStatus('scanning');
           handleQRScan(result.getText());
           closeCamera();
-        } else if (err) {
-          console.log('🔍 ZXing scanning... (no QR detected yet)');
+        } else if (err && err.name !== 'NotFoundException') {
+           // still scanning
           setScanAttempts(prev => prev + 1);
           setScannerSwitchAttempts(prev => prev + 1);
           
@@ -275,7 +329,7 @@ function App() {
           handleScanAttempts();
           
           // Restart scanner if too many attempts
-          if (scannerSwitchAttempts > 50) {
+          if (scannerSwitchAttempts > 30) {
             console.log('🔄 Restarting ZXing scanner...');
             setScannerSwitchAttempts(0);
             setScanAttempts(0);
@@ -284,28 +338,222 @@ function App() {
               startZxingScanner();
             }, 1000);
           }
+
+          // Fallback: try BarcodeDetector for skewed/low-contrast codes
+          if ('BarcodeDetector' in window && !barcodeDetectorRef.current && scannerSwitchAttempts > 8) {
+            console.log('🧪 Starting BarcodeDetector fallback');
+            startBarcodeDetectorFallback();
+          }
+          // Attempt CDN ZXing-core frame decode first for tough cases
+          if (scannerSwitchAttempts === 14) {
+            setScanningHint('Trying enhanced decode...');
+            tryZXingCoreDecodeOnce().then((text) => {
+              if (text) {
+                console.log('🎯 QR Code decoded via ZXing core');
+                setScanningHint('QR Code detected! Processing...');
+                setCameraStatus('scanning');
+                handleQRScan(text);
+                closeCamera();
+              }
+            });
+          }
+          // Last resort after many attempts: single server-side decode
+          if (scannerSwitchAttempts === 20) {
+            setScanningHint('Trying server-side decode...');
+            tryServerSideDecodeOnce().then((text) => {
+              if (text) {
+                console.log('🎯 QR Code decoded on server');
+                setScanningHint('QR Code detected! Processing...');
+                setCameraStatus('scanning');
+                handleQRScan(text);
+                closeCamera();
+              }
+            });
+          }
         }
-      }, hints);
+      });
     }).catch(err => {
       console.error('❌ Failed to get camera stream:', err);
+      setCameraStatus('error');
+      setScanningHint('Camera access failed. Trying basic mode...');
+      
       // Try with basic constraints
       navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          videoRef.current.play().then(() => {
+            console.log('✅ Basic video stream started');
+            setCameraStatus('active');
+            setScanningHint('Camera ready (basic mode)');
+          }).catch(err => {
+            console.error('❌ Basic video play failed:', err);
+            setCameraStatus('error');
+            setScanningHint('Camera failed to start');
+          });
         }
         codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
           if (result) {
             console.log('🎯 QR Code detected by ZXing!');
             console.log('📄 QR Data:', result.getText());
             setScanningHint('QR Code detected! Processing...');
+            setCameraStatus('scanning');
             handleQRScan(result.getText());
             closeCamera();
           }
         });
+      }).catch(fallbackErr => {
+        console.error('❌ Camera access completely failed:', fallbackErr);
+        setCameraStatus('error');
+        setScanningHint('Camera access failed. Please check permissions.');
       });
     });
     
     console.log('✅ Enhanced ZXing Scanner started successfully');
+  };
+
+  const startBarcodeDetectorFallback = () => {
+    try {
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      barcodeDetectorRef.current = detector;
+      const detect = async () => {
+        if (!isCameraOpen || !videoRef.current) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          if (codes && codes.length > 0 && codes[0].rawValue) {
+            console.log('🎯 QR Code detected by BarcodeDetector!');
+            setScanningHint('QR Code detected! Processing...');
+            setCameraStatus('scanning');
+            handleQRScan(codes[0].rawValue);
+            closeCamera();
+            return;
+          }
+        } catch {}
+        requestAnimationFrame(detect);
+      };
+      requestAnimationFrame(detect);
+    } catch (e) {
+      console.warn('BarcodeDetector not available:', e);
+    }
+  };
+
+  // Last-resort: upload a video frame to backend for server-side decoding
+  const tryServerSideDecodeOnce = async () => {
+    if (!videoRef.current) return null;
+    try {
+      const canvas = document.createElement('canvas');
+      const video = videoRef.current;
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!w || !h) return null;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      const res = await fetch('/api/decode-qr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: dataUrl })
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.text || null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Load ZXing core from CDN lazily
+  const loadZXingCore = async () => {
+    if (zxingCoreRef.current) return zxingCoreRef.current;
+    try {
+      const mod = await import('https://unpkg.com/@zxing/library@latest?module');
+      zxingCoreRef.current = mod;
+      return mod;
+    } catch (e) {
+      console.warn('Failed to load ZXing core from CDN', e);
+      return null;
+    }
+  };
+
+  // Try decoding current frame with ZXing core (handles skew/contrast)
+  const tryZXingCoreDecodeOnce = async () => {
+    const core = await loadZXingCore();
+    if (!core || !videoRef.current) return null;
+    const {
+      RGBLuminanceSource,
+      BinaryBitmap,
+      HybridBinarizer,
+      MultiFormatReader,
+      DecodeHintType,
+      BarcodeFormat
+    } = core;
+    
+    const getFrameImageData = (rotateDeg = 0, enhance = true, crop = true) => {
+      const video = videoRef.current;
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return null;
+      const side = crop ? Math.floor(Math.min(vw, vh) * 0.8) : Math.min(vw, vh);
+      const sx = Math.floor((vw - side) / 2);
+      const sy = Math.floor((vh - side) / 2);
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (rotateDeg % 180 === 0) {
+        canvas.width = side; canvas.height = side;
+      } else {
+        canvas.width = side; canvas.height = side;
+      }
+      ctx.save();
+      // Translate to center and rotate, then draw ROI
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((rotateDeg * Math.PI) / 180);
+      ctx.drawImage(video, sx, sy, side, side, -side / 2, -side / 2, side, side);
+      ctx.restore();
+      let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      if (enhance) {
+        // simple contrast stretch on grayscale
+        let min = 255, max = 0;
+        for (let i = 0; i < imgData.data.length; i += 4) {
+          const r = imgData.data[i], g = imgData.data[i + 1], b = imgData.data[i + 2];
+          const y = (r * 0.299 + g * 0.587 + b * 0.114) | 0;
+          if (y < min) min = y; if (y > max) max = y;
+          imgData.data[i] = imgData.data[i + 1] = imgData.data[i + 2] = y;
+        }
+        const span = Math.max(1, max - min);
+        for (let i = 0; i < imgData.data.length; i += 4) {
+          const v = ((imgData.data[i] - min) * 255) / span;
+          const vv = v | 0;
+          imgData.data[i] = imgData.data[i + 1] = imgData.data[i + 2] = vv;
+        }
+      }
+      return imgData;
+    };
+
+    const tryDecode = (imgData) => {
+      const luminance = new RGBLuminanceSource(imgData.data, imgData.width, imgData.height);
+      const binarizer = new HybridBinarizer(luminance);
+      const bitmap = new BinaryBitmap(binarizer);
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      hints.set(DecodeHintType.ALSO_INVERTED, true);
+      const reader = new MultiFormatReader();
+      reader.setHints(hints);
+      const result = reader.decode(bitmap);
+      return result?.getText?.() || result?.text || null;
+    };
+
+    const rotations = [0, 90, 180, 270];
+    for (const rot of rotations) {
+      try {
+        const img = getFrameImageData(rot, true, true);
+        if (!img) continue;
+        const text = tryDecode(img);
+        if (text) return text;
+      } catch {}
+    }
+    return null;
   };
 
   const handleScanAttempts = () => {
@@ -349,12 +597,37 @@ function App() {
       console.log('✅ ZXing Scanner stopped');
       codeReader.current = null;
     }
+    
+    // Clean up video stream
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject;
+      const tracks = stream.getTracks();
+      tracks.forEach(track => {
+        track.stop();
+        console.log('✅ Video track stopped:', track.kind);
+      });
+      videoRef.current.srcObject = null;
+    }
+    
+    setCameraStatus('closed');
+    setScanningHint('');
   };
 
-  const toggleFlash = () => {
+  const toggleFlash = async () => {
     console.log('⚡ Toggling flash...');
-    setIsFlashOn(!isFlashOn);
-    // Note: Actual flash control would require camera API access
+    try {
+      const stream = videoRef.current?.srcObject;
+      const track = stream?.getVideoTracks?.()[0];
+      const capabilities = track?.getCapabilities?.();
+      if (capabilities && capabilities.torch) {
+        const next = !isFlashOn;
+        await track.applyConstraints({ advanced: [{ torch: next }] });
+        setIsFlashOn(next);
+        return;
+      }
+    } catch {}
+    // Fallback UI toggle if no torch capability
+    setIsFlashOn((v) => !v);
   };
 
   const handleZoomIn = () => {
@@ -399,54 +672,87 @@ function App() {
     }
   };
 
+  // Helper: fetch with timeout and no-store caching
+  const fetchWithTimeout = async (resource, options = {}, timeoutMs = 8000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(resource, { ...options, signal: controller.signal, cache: 'no-store' });
+      return response;
+    } finally {
+      clearTimeout(id);
+    }
+  };
+
   const handleQRScan = async (qrData) => {
+    if (isProcessingScan) return; // prevent duplicate scans while processing
     setShowQRScannedPopup(true);
     setTimeout(() => setShowQRScannedPopup(false), 2000);
     try {
       const attendanceId = qrData;
-      // Use the pre-fetched cookies, one per user
       const cookies = userCookies;
-      if (!cookies || cookies.length !== users.length) {
-        alert('Cookies not loaded yet. Please wait and try again.');
+      if (!users.length) {
+        alert('No users loaded yet. Please add users first.');
         return;
       }
-      // Assign each user their own cookie
-      const results = await Promise.all(users.map((user, i) => {
+      if (!cookies || cookies.length !== users.length) {
+        alert('Cookies not loaded yet. Please wait a moment and try again.');
+        return;
+      }
+
+      setIsProcessingScan(true);
+      setScanProgress({ completed: 0, total: users.length });
+      // Seed results immediately so UI shows progress
+      setAttendanceResults(users.map((u) => ({ name: u.name, status: '⏳ Sending...', code: 'PENDING' })));
+
+      const tasks = users.map((user, i) => (async () => {
         const userCookie = cookies[i];
         if (!userCookie) {
-          return {
-            name: user.name,
-            status: '❌ Failed to get session cookie',
-            code: 'COOKIE_ERROR'
-          };
+          const failure = { name: user.name, status: '❌ Failed to get session cookie', code: 'COOKIE_ERROR' };
+          setAttendanceResults((prev) => {
+            const updated = [...prev];
+            updated[i] = failure;
+            return updated;
+          });
+          setScanProgress((p) => ({ ...p, completed: p.completed + 1 }));
+          return;
         }
-        return fetch('/api/mark-attendance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            stuId: user.stuId,
-            attendanceId: attendanceId,
-            cookie: userCookie
-          })
-        })
-        .then(response => response.json())
-        .then(data => {
+
+        try {
+          const response = await fetchWithTimeout('/api/mark-attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stuId: user.stuId, attendanceId, cookie: userCookie })
+          }, 9000);
+          const data = await response.json().catch(() => ({}));
           const code = data?.output?.data?.code;
           let status = 'Unknown';
           if (code === 'SUCCESS') status = '✅ Marked Present';
           else if (code === 'ATTENDANCE_NOT_VALID') status = '❌ Invalid QR (expired or wrong student)';
           else status = `⚠️ ${code || 'Error'}`;
-          return { name: user.name, status, code };
-        })
-        .catch(() => ({
-          name: user.name,
-          status: '❌ Error marking attendance',
-          code: 'ERROR'
-        }));
-      }));
-      setAttendanceResults(results);
+          const result = { name: user.name, status, code };
+          setAttendanceResults((prev) => {
+            const updated = [...prev];
+            updated[i] = result;
+            return updated;
+          });
+        } catch (e) {
+          const errorResult = { name: user.name, status: '❌ Timeout or network error', code: 'TIMEOUT' };
+          setAttendanceResults((prev) => {
+            const updated = [...prev];
+            updated[i] = errorResult;
+            return updated;
+          });
+        } finally {
+          setScanProgress((p) => ({ ...p, completed: p.completed + 1 }));
+        }
+      })());
+
+      await Promise.allSettled(tasks);
     } catch (error) {
       console.error('💥 Error processing QR scan:', error);
+    } finally {
+      setIsProcessingScan(false);
     }
   };
 
@@ -662,6 +968,16 @@ function App() {
                     <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-xs">
                       Scanner: ZXing
                     </div>
+
+                    {/* Camera Status Indicator */}
+                    <div className={`absolute top-4 right-16 px-3 py-1 rounded-lg text-xs ${
+                      cameraStatus === 'active' ? 'bg-green-500 text-white' :
+                      cameraStatus === 'error' ? 'bg-red-500 text-white' :
+                      cameraStatus === 'scanning' ? 'bg-blue-500 text-white' :
+                      'bg-yellow-500 text-white'
+                    }`}>
+                      Camera: {cameraStatus}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -686,12 +1002,21 @@ function App() {
                         <p className="text-gray-400 text-xs mt-1">Attendance recorded</p>
                       )}
                     </div>
-                    {index === 2 && (
+                     {index === 2 && (
                       <button
-                        onClick={openCamera}
-                        className="bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 w-full text-sm font-medium"
+                        onClick={() => {
+                          if (!isReadyToScan) {
+                            alert('Users/cookies are still loading. Please wait a moment and try again.');
+                            return;
+                          }
+                          openCamera();
+                        }}
+                        disabled={!isReadyToScan}
+                        className={`px-4 py-3 rounded-lg w-full text-sm font-medium ${
+                          isReadyToScan ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                        }`}
                       >
-                        Record Attendance
+                        {isReadyToScan ? 'Record Attendance' : 'Preparing...'}
                       </button>
                     )}
                   </div>
@@ -709,6 +1034,9 @@ function App() {
             <div className="card-body p-4 sm:p-6">
               <h3 className="card-title text-lg flex items-center gap-2 mb-4">
                 📋 Scan Results
+                {isProcessingScan && (
+                  <span className="text-xs text-gray-500">({scanProgress.completed}/{scanProgress.total})</span>
+                )}
               </h3>
               <div className="space-y-3 max-h-60 overflow-y-auto">
                 {attendanceResults.map((result, index) => (
