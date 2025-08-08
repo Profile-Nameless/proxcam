@@ -247,7 +247,7 @@ function App() {
     console.log('📱 Starting ZXing QR Scanner (simple mode) + WASM worker fallback...');
     
     codeReader.current = new BrowserMultiFormatReader();
-
+    
     // Prefer high resolution (up to 4K) when supported
     const constraints = {
       video: {
@@ -410,7 +410,7 @@ function App() {
       const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
       const capabilities = track?.getCapabilities?.();
       if (capabilities && capabilities.zoom) {
-        track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
+          track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
         return true;
       }
     } catch {}
@@ -425,21 +425,7 @@ function App() {
     }
   };
 
-  const handleZoomIn = () => {
-    setZoomLevel((prev) => {
-      const next = Math.min(prev + 0.1, 3);
-      applyZoom(next);
-      return next;
-    });
-  };
-
-  const handleZoomOut = () => {
-    setZoomLevel((prev) => {
-      const next = Math.max(prev - 0.1, 1);
-      applyZoom(next);
-      return next;
-    });
-  };
+  // Slider handles zoom directly; button handlers removed
 
   // Removed flash/zoom/filters
 
