@@ -614,9 +614,7 @@ function App() {
 
             {/* QR Scanner - Above Today's Schedule */}
             {isCameraOpen && (
-              <div className={`bg-black rounded-lg shadow-2xl mb-6 transition-all duration-300 ${
-                isMinimized ? 'w-64 h-48' : 'w-full'
-              }`}>
+              <div className="bg-black rounded-lg shadow-2xl mb-6 transition-all duration-300 w-full">
                 <div className="p-4 sm:p-6">
                   <div className="relative">
                     {/* QR Scanner Container for HTML5 */}
