@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserMultiFormatReader } from '@zxing/browser';
+import { Html5Qrcode, Html5QrcodeScanType } from 'html5-qrcode';
 import './App.css';
 
 const timetable = [
@@ -203,39 +203,7 @@ function App() {
     setScanningHint('Position QR code within the frame');
     setScanAttempts(0);
     setTimeout(() => {
-      // Request high-res video with advanced settings for better QR detection
-      const constraints = {
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1920, min: 1280 },
-          height: { ideal: 1080, min: 720 },
-          frameRate: { ideal: 30, min: 15 },
-          focusMode: 'continuous',
-          exposureMode: 'continuous',
-          whiteBalanceMode: 'continuous',
-          brightness: { ideal: 0.5 },
-          contrast: { ideal: 1.0 },
-          saturation: { ideal: 1.0 },
-          sharpness: { ideal: 1.0 }
-        }
-      };
-      navigator.mediaDevices.getUserMedia(constraints).then(stream => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          // Apply CSS filters for better scanning
-          videoRef.current.style.filter = `brightness(${brightness}) contrast(${contrast})`;
-        }
-        startScanner();
-      }).catch(err => {
-        console.error('Camera error:', err);
-        // Fallback to basic constraints
-        navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-          }
-          startScanner();
-        });
-      });
+      startScanner();
     }, 300);
   };
 
@@ -252,17 +220,34 @@ function App() {
     }
     
     console.log('🔍 Initializing QR scanner...');
-    codeReader.current = new BrowserMultiFormatReader();
+    
+    // Create new Html5Qrcode instance
+    codeReader.current = new Html5Qrcode("qr-reader");
+    
+    const config = {
+      fps: 10,
+      qrbox: { width: 250, height: 250 },
+      aspectRatio: 1.0,
+      supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+      disableFlip: false,
+      experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true
+      }
+    };
     
     console.log('🎥 Starting video stream...');
-    codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
-      if (result) {
+    codeReader.current.start(
+      { facingMode: "environment" },
+      config,
+      (decodedText, decodedResult) => {
         console.log('🎯 QR Code detected!');
-        console.log('📄 QR Data:', result.getText());
+        console.log('📄 QR Data:', decodedText);
         setScanningHint('QR Code detected! Processing...');
-        handleQRScan(result.getText());
+        handleQRScan(decodedText);
         closeCamera();
-      } else if (err) {
+      },
+      (errorMessage) => {
+        // Handle scan error
         console.log('🔍 Scanning... (no QR detected yet)');
         setScanAttempts(prev => prev + 1);
         
@@ -298,17 +283,22 @@ function App() {
           setScanningHint('QR may be too small or dim. Try getting closer');
         }
       }
+    ).then(() => {
+      console.log('✅ Scanner started successfully');
+    }).catch((err) => {
+      console.error('❌ Failed to start scanner:', err);
     });
-    
-    console.log('✅ Scanner started successfully');
   };
 
   const stopScanner = () => {
     console.log('⏹️ Stopping scanner...');
     if (codeReader.current) {
-      codeReader.current.reset();
-      codeReader.current = null;
-      console.log('✅ Scanner stopped');
+      codeReader.current.stop().then(() => {
+        console.log('✅ Scanner stopped');
+        codeReader.current = null;
+      }).catch((err) => {
+        console.error('❌ Error stopping scanner:', err);
+      });
     }
   };
 
@@ -539,16 +529,14 @@ function App() {
               }`}>
                 <div className="p-4 sm:p-6">
                   <div className="relative">
-                    <video 
-                      ref={videoRef} 
-                      className={`rounded-lg object-cover bg-black transition-all duration-300 ${
+                    {/* QR Scanner Container */}
+                    <div 
+                      id="qr-reader"
+                      className={`rounded-lg transition-all duration-300 ${
                         isMinimized ? 'h-32' : 'h-80 sm:h-96 w-full'
                       }`}
-                      autoPlay={true} 
-                      muted={true} 
-                      playsInline={true}
                     />
-                    
+
                     {/* QR Scanning Frame */}
                     {!isMinimized && (
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
