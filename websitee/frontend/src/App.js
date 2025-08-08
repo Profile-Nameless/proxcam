@@ -201,7 +201,6 @@ function App() {
   const openCamera = () => {
     console.log('📷 Opening camera...');
     setIsCameraOpen(true);
-    setIsMinimized(false);
     setAttendanceResults([]);
     setScanningHint('Position QR code within the frame');
     setScanAttempts(0);
@@ -238,8 +237,8 @@ function App() {
     codeReader.current = new Html5Qrcode("qr-reader");
     
     const config = {
-      fps: 10,
-      qrbox: { width: 250, height: 250 },
+      fps: 15,
+      qrbox: { width: 300, height: 300 },
       aspectRatio: 1.0,
       supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
       disableFlip: false,
@@ -249,7 +248,14 @@ function App() {
     };
     
     codeReader.current.start(
-      { facingMode: "environment" },
+      { 
+        facingMode: "environment",
+        focusMode: "continuous",
+        exposureMode: "continuous",
+        whiteBalanceMode: "continuous",
+        width: { ideal: 1920, min: 1280 },
+        height: { ideal: 1080, min: 720 }
+      },
       config,
       (decodedText, decodedResult) => {
         console.log('🎯 QR Code detected by HTML5!');
@@ -294,7 +300,24 @@ function App() {
     
     codeReader.current = new BrowserMultiFormatReader();
     
-    codeReader.current.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
+    // Enhanced camera constraints for better focus
+    const constraints = {
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1920, min: 1280 },
+        height: { ideal: 1080, min: 720 },
+        frameRate: { ideal: 30, min: 15 },
+        focusMode: 'continuous',
+        exposureMode: 'continuous',
+        whiteBalanceMode: 'continuous',
+        brightness: { ideal: 0.5 },
+        contrast: { ideal: 1.0 },
+        saturation: { ideal: 1.0 },
+        sharpness: { ideal: 1.0 }
+      }
+    };
+    
+    codeReader.current.decodeFromConstraints(constraints, videoRef.current, (result, err) => {
       if (result) {
         console.log('🎯 QR Code detected by ZXing!');
         console.log('📄 QR Data:', result.getText());
@@ -609,9 +632,7 @@ function App() {
                     {currentScanner === 'html5' && (
                       <div 
                         id="qr-reader"
-                        className={`rounded-lg transition-all duration-300 ${
-                          isMinimized ? 'h-32' : 'h-80 sm:h-96 w-full'
-                        }`}
+                        className="rounded-lg transition-all duration-300 h-80 sm:h-96 w-full"
                       />
                     )}
                     
@@ -619,9 +640,7 @@ function App() {
                     {currentScanner === 'zxing' && (
                       <video 
                         ref={videoRef} 
-                        className={`rounded-lg object-cover bg-black transition-all duration-300 ${
-                          isMinimized ? 'h-32' : 'h-80 sm:h-96 w-full'
-                        }`}
+                        className="rounded-lg object-cover bg-black transition-all duration-300 h-80 sm:h-96 w-full"
                         autoPlay={true} 
                         muted={true} 
                         playsInline={true}
@@ -629,23 +648,21 @@ function App() {
                     )}
 
                     {/* QR Scanning Frame */}
-                    {!isMinimized && (
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="relative w-full h-full">
-                          {/* Red dotted border with L-shaped corners */}
-                          <div className="absolute inset-4 border-2 border-red-500 border-dashed">
-                            {/* L-shaped corners */}
-                            <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-red-500"></div>
-                            <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-red-500"></div>
-                            <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-red-500"></div>
-                            <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-red-500"></div>
-                          </div>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="relative w-full h-full">
+                        {/* Red dotted border with L-shaped corners */}
+                        <div className="absolute inset-4 border-2 border-red-500 border-dashed">
+                          {/* L-shaped corners */}
+                          <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-red-500"></div>
+                          <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-red-500"></div>
+                          <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-red-500"></div>
+                          <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-red-500"></div>
                         </div>
                       </div>
-                    )}
+                    </div>
 
                     {/* Scanning Hint */}
-                    {!isMinimized && scanningHint && (
+                    {scanningHint && (
                       <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-2 rounded-lg text-sm">
                         {scanningHint}
                       </div>
@@ -709,18 +726,10 @@ function App() {
                       </button>
                     </div>
 
-                    {/* Mode Indicator */}
-                    {!isMinimized && (
-                      <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-xs">
-                        Mode: {scanningMode}
-                      </div>
-                    )}
                     {/* Scanner Type Indicator */}
-                    {!isMinimized && (
-                      <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-xs">
-                        Scanner: {currentScanner.toUpperCase()}
-                      </div>
-                    )}
+                    <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-xs">
+                      Scanner: {currentScanner.toUpperCase()}
+                    </div>
                   </div>
                 </div>
               </div>
