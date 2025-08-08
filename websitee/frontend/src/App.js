@@ -78,6 +78,7 @@ function App() {
   const [showAddUserButton, setShowAddUserButton] = useState(false);
   const dateTapCountRef = useRef(0);
   const [scanningHint, setScanningHint] = useState('');
+  const [zoomLevel, setZoomLevel] = useState(1);
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
@@ -218,6 +219,7 @@ function App() {
     setIsCameraOpen(true);
     setAttendanceResults([]);
     setScanningHint('Initializing camera...');
+    setZoomLevel(1);
     setTimeout(() => {
       startScanner();
     }, 300);
@@ -361,6 +363,8 @@ function App() {
         console.log('✅ Video track stopped:', track.kind);
       });
       videoRef.current.srcObject = null;
+      // Reset any CSS zoom transforms
+      videoRef.current.style.transform = '';
     }
     
     setScanningHint('');
@@ -418,6 +422,43 @@ function App() {
         closeCamera();
       }
     } catch {}
+  };
+
+  // Zoom controls: prefer hardware zoom; fallback to CSS scale
+  const applyZoomToTrack = (zoom) => {
+    try {
+      const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
+      const capabilities = track?.getCapabilities?.();
+      if (capabilities && capabilities.zoom) {
+        track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
+        return true;
+      }
+    } catch {}
+    return false;
+  };
+
+  const applyZoom = (zoom) => {
+    const usedHardware = applyZoomToTrack(zoom);
+    if (!usedHardware && videoRef.current) {
+      videoRef.current.style.transformOrigin = 'center center';
+      videoRef.current.style.transform = `scale(${zoom})`;
+    }
+  };
+
+  const handleZoomIn = () => {
+    setZoomLevel((prev) => {
+      const next = Math.min(prev + 0.1, 3);
+      applyZoom(next);
+      return next;
+    });
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel((prev) => {
+      const next = Math.max(prev - 0.1, 1);
+      applyZoom(next);
+      return next;
+    });
   };
 
   // Removed flash/zoom/filters
@@ -652,11 +693,36 @@ function App() {
                     {/* Scanning Hint */}
                     {scanningHint && (
                       <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-2 rounded-lg text-sm">
-                        {scanningHint}
+                        {scanningHint.replace('Try adjusting distance or angle','').replace('Try zooming in or using flash','').replace('QR may be too small or dim. Try getting closer','').trim()}
                       </div>
                     )}
 
-                    {/* Minimal UI controls removed for stability */}
+                    {/* Zoom Controls */}
+                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
+                      <button
+                        onClick={handleZoomIn}
+                        className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500 transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-black text-sm font-bold ml-1">+</span>
+                      </button>
+                      <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+                        {Math.round(zoomLevel * 100)}%
+                      </div>
+                      <button
+                        onClick={handleZoomOut}
+                        className="w-12 h-12 bg-gray-400 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-500 transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-black text-sm font-bold ml-1">-</span>
+                      </button>
+                    </div>
 
                     {/* Close Button */}
                     <div className="absolute top-4 right-4">
@@ -670,8 +736,7 @@ function App() {
                       </button>
                     </div>
 
-                    {/* Scanner Indicator */}
-                    <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-xs">Scanner</div>
+                    {/* Scanner Indicator removed */}
                   </div>
                 </div>
               </div>
