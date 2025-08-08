@@ -80,6 +80,10 @@ function App() {
   const dateTapCountRef = useRef(0);
   const [isMinimized, setIsMinimized] = useState(false);
   const [scanningHint, setScanningHint] = useState('');
+  const [scanningMode, setScanningMode] = useState('auto');
+  const [brightness, setBrightness] = useState(1);
+  const [contrast, setContrast] = useState(1);
+  const [scanAttempts, setScanAttempts] = useState(0);
 
   // Load users from Supabase on mount
   useEffect(() => {
@@ -197,21 +201,29 @@ function App() {
     setIsMinimized(false);
     setAttendanceResults([]);
     setScanningHint('Position QR code within the frame');
+    setScanAttempts(0);
     setTimeout(() => {
-      // Request high-res video for better QR detection
+      // Request high-res video with advanced settings for better QR detection
       const constraints = {
         video: {
           facingMode: 'environment',
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+          frameRate: { ideal: 30, min: 15 },
           focusMode: 'continuous',
           exposureMode: 'continuous',
-          whiteBalanceMode: 'continuous'
+          whiteBalanceMode: 'continuous',
+          brightness: { ideal: 0.5 },
+          contrast: { ideal: 1.0 },
+          saturation: { ideal: 1.0 },
+          sharpness: { ideal: 1.0 }
         }
       };
       navigator.mediaDevices.getUserMedia(constraints).then(stream => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          // Apply CSS filters for better scanning
+          videoRef.current.style.filter = `brightness(${brightness}) contrast(${contrast})`;
         }
         startScanner();
       }).catch(err => {
@@ -252,7 +264,39 @@ function App() {
         closeCamera();
       } else if (err) {
         console.log('🔍 Scanning... (no QR detected yet)');
-        setScanningHint('Scanning... Position QR code clearly');
+        setScanAttempts(prev => prev + 1);
+        
+        // Auto-adjust settings based on scan attempts
+        if (scanAttempts === 5) {
+          // First adjustment: increase brightness
+          adjustBrightness(1.5);
+          setScanningHint('Auto-adjusting brightness...');
+        } else if (scanAttempts === 10) {
+          // Second adjustment: increase contrast
+          adjustContrast(1.5);
+          setScanningHint('Auto-adjusting contrast...');
+        } else if (scanAttempts === 15) {
+          // Third adjustment: maximum brightness
+          adjustBrightness(2.0);
+          setScanningHint('Auto-adjusting for dim QR...');
+        } else if (scanAttempts === 20) {
+          // Fourth adjustment: maximum contrast
+          adjustContrast(2.0);
+          setScanningHint('Auto-adjusting for small QR...');
+        } else if (scanAttempts === 25) {
+          // Fifth adjustment: reset and try different approach
+          adjustBrightness(0.8);
+          adjustContrast(1.2);
+          setScanningHint('Trying different approach...');
+        } else if (scanAttempts < 5) {
+          setScanningHint('Scanning... Position QR code clearly');
+        } else if (scanAttempts < 10) {
+          setScanningHint('Try adjusting distance or angle');
+        } else if (scanAttempts < 15) {
+          setScanningHint('Try zooming in or using flash');
+        } else {
+          setScanningHint('QR may be too small or dim. Try getting closer');
+        }
       }
     });
     
@@ -300,6 +344,29 @@ function App() {
         }
       }
     }
+  };
+
+  const adjustBrightness = (value) => {
+    setBrightness(value);
+    if (videoRef.current) {
+      videoRef.current.style.filter = `brightness(${value}) contrast(${contrast})`;
+    }
+  };
+
+  const adjustContrast = (value) => {
+    setContrast(value);
+    if (videoRef.current) {
+      videoRef.current.style.filter = `brightness(${brightness}) contrast(${value})`;
+    }
+  };
+
+  const switchScanningMode = () => {
+    const modes = ['auto', 'enhanced', 'high-sensitivity'];
+    const currentIndex = modes.indexOf(scanningMode);
+    const nextMode = modes[(currentIndex + 1) % modes.length];
+    setScanningMode(nextMode);
+    setScanAttempts(0);
+    setScanningHint(`Switched to ${nextMode} mode`);
   };
 
   const handleQRScan = async (qrData) => {
@@ -505,22 +572,8 @@ function App() {
                       </div>
                     )}
 
-                    {/* Camera Controls */}
+                    {/* Enhanced Camera Controls */}
                     <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
-                      {/* Minimize/Maximize Button */}
-                      <button
-                        onClick={() => setIsMinimized(!isMinimized)}
-                        className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-600 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                          {isMinimized ? (
-                            <path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 11-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12z" clipRule="evenodd" />
-                          ) : (
-                            <path fillRule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 11-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 010-2h4a1 1 0 011 1v4a1 1 0 01-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12z" clipRule="evenodd" />
-                          )}
-                        </svg>
-                      </button>
-
                       {/* Zoom In Button */}
                       <button
                         onClick={handleZoomIn}
@@ -576,6 +629,13 @@ function App() {
                         </svg>
                       </button>
                     </div>
+
+                    {/* Mode Indicator */}
+                    {!isMinimized && (
+                      <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white px-3 py-1 rounded-lg text-xs">
+                        Mode: {scanningMode}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
