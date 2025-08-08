@@ -235,7 +235,6 @@ function App() {
     if (!videoRef.current) {
       console.error('❌ Video ref not available');
       setScanningHint('Camera initialization failed');
-      setCameraStatus('error');
       return;
     }
     
