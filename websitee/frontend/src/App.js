@@ -268,28 +268,20 @@ function App() {
     const ReaderClass = ZX?.BrowserMultiFormatReader || BrowserMultiFormatReader;
     codeReader.current = new ReaderClass();
     
-    // Prefer high resolution (up to 4K) when supported
+    // Stable, compatible constraints similar to the reference site
     const constraints = {
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 3840 },
-        height: { ideal: 2160 },
-        frameRate: { ideal: 60, min: 15 }
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30, min: 15 },
       }
     };
 
     navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        try {
-          const track = stream.getVideoTracks?.()[0];
-          const capabilities = track?.getCapabilities?.();
-          if (capabilities && capabilities.width && capabilities.height) {
-            const targetW = Math.min(3840, capabilities.width.max || 3840);
-            const targetH = Math.min(2160, capabilities.height.max || 2160);
-            track.applyConstraints({ width: targetW, height: targetH }).catch(() => {});
-          }
-        } catch {}
+        // No post-adjustment; let the browser pick within constraints
         videoRef.current.play().catch(() => {});
       }
       // Start the scanner
@@ -299,7 +291,12 @@ function App() {
           console.log('📄 QR Data:', result.getText());
           setScanningHint('QR Code detected! Processing...');
           handleQRScan(result.getText());
-          closeCamera();
+          // Mirror the reference: reset immediately and hide stream
+          try { codeReader.current?.reset?.(); } catch {}
+          if (videoRef.current) {
+            videoRef.current.classList.add('hidden');
+            // Do not abruptly stop tracks; let UI finish
+          }
         } else {
           // NotFoundException: continue
         }
@@ -364,22 +361,18 @@ function App() {
 
   // Removed WASM worker path for now (reworking processing)
 
-  const applyCssZoom = (zoom) => {
-    if (videoRef.current) {
+  const applyZoom = (zoom) => {
+    // Prefer hardware zoom; fallback to CSS only if capability is missing
+    const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
+    const capabilities = track?.getCapabilities?.();
+    if (capabilities && capabilities.zoom) {
+      track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
+      // Clear CSS transform if previously set
+      if (videoRef.current) videoRef.current.style.transform = '';
+    } else if (videoRef.current) {
       videoRef.current.style.transformOrigin = 'center center';
       videoRef.current.style.transform = `scale(${zoom})`;
     }
-  };
-
-  const applyZoom = (zoom) => {
-    // During slider drag, use instant CSS zoom for zero lag
-    skipWorkerDecodeRef.current = true;
-    applyCssZoom(zoom);
-    // Re-enable worker decodes soon to keep scanning responsive
-    clearTimeout(applyZoom._t);
-    applyZoom._t = setTimeout(() => {
-      if (!isZoomDraggingRef.current) skipWorkerDecodeRef.current = false;
-    }, 150);
   };
 
   const handleZoomIn = () => {
