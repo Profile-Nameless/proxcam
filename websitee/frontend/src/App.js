@@ -84,6 +84,7 @@ function App() {
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
   const lastWorkerDecodeAtRef = useRef(0);
   const skipWorkerDecodeRef = useRef(false);
+  const isZoomDraggingRef = useRef(false);
 
   // Load users and cookies on mount (fast path)
   useEffect(() => {
@@ -418,19 +419,31 @@ function App() {
     return false;
   };
 
-  const applyZoom = (zoom) => {
-    // During active slider drag, skip worker decodes for smoothness
-    skipWorkerDecodeRef.current = true;
-    const usedHardware = applyZoomToTrack(zoom);
-    if (!usedHardware && videoRef.current) {
+  const applyCssZoom = (zoom) => {
+    if (videoRef.current) {
       videoRef.current.style.transformOrigin = 'center center';
       videoRef.current.style.transform = `scale(${zoom})`;
     }
-    // Re-enable worker decodes on next tick
+  };
+
+  const applyZoom = (zoom) => {
+    // During slider drag, use instant CSS zoom for zero lag
+    skipWorkerDecodeRef.current = true;
+    applyCssZoom(zoom);
+    // Re-enable worker decodes soon to keep scanning responsive
     clearTimeout(applyZoom._t);
     applyZoom._t = setTimeout(() => {
-      skipWorkerDecodeRef.current = false;
-    }, 120);
+      if (!isZoomDraggingRef.current) skipWorkerDecodeRef.current = false;
+    }, 150);
+  };
+
+  const commitHardwareZoom = (zoom) => {
+    const usedHardware = applyZoomToTrack(zoom);
+    if (usedHardware && videoRef.current) {
+      // If hardware zoom applied, remove CSS scaling to avoid double-zoom
+      videoRef.current.style.transform = '';
+    }
+    skipWorkerDecodeRef.current = false;
   };
 
   // Slider handles zoom directly; button handlers removed
@@ -675,11 +688,15 @@ function App() {
                           max="3"
                           step="0.05"
                           value={zoomLevel}
+                          onMouseDown={() => { isZoomDraggingRef.current = true; skipWorkerDecodeRef.current = true; }}
+                          onTouchStart={() => { isZoomDraggingRef.current = true; skipWorkerDecodeRef.current = true; }}
                           onChange={(e) => {
                             const next = parseFloat(e.target.value);
                             setZoomLevel(next);
                             applyZoom(next);
                           }}
+                          onMouseUp={() => { isZoomDraggingRef.current = false; commitHardwareZoom(zoomLevel); }}
+                          onTouchEnd={() => { isZoomDraggingRef.current = false; commitHardwareZoom(zoomLevel); }}
                           className="range w-full"
                           aria-label="Zoom"
                         />
