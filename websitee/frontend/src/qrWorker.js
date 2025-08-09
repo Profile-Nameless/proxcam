@@ -37,77 +37,64 @@ function bitmapToImageData(bitmap) {
   return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
-function enhanceGray(imgData) {
-  // Convert to grayscale + local contrast boost (simple CLAHE-like)
-  const d = imgData.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const y = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0;
-    d[i] = d[i + 1] = d[i + 2] = y;
-  }
-  // Normalize histogram
-  let min = 255, max = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    const v = d[i];
-    if (v < min) min = v;
-    if (v > max) max = v;
-  }
-  const span = Math.max(1, max - min);
-  for (let i = 0; i < d.length; i += 4) {
-    const v = ((d[i] - min) * 255) / span;
-    const vv = v | 0;
-    d[i] = d[i + 1] = d[i + 2] = vv;
-  }
-  return imgData;
-}
-
 async function tryDecode(bitmap) {
   const mod = await loadZXing();
   if (!mod) return null;
-  let img = bitmapToImageData(bitmap);
-  // Try direct
-  try {
-    const text = decodeBitmapWithZXing(mod, img);
-    if (text) return text;
-  } catch {}
-  // Try rotations
-  const rotations = [90, 180, 270];
-  for (const rot of rotations) {
-    try {
-      const canvas = new OffscreenCanvas(img.width, img.height);
-      const ctx = canvas.getContext('2d');
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((rot * Math.PI) / 180);
-      ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
-      img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const text = decodeBitmapWithZXing(mod, img);
-      if (text) return text;
-    } catch {}
+  const makeImageData = (bmp) => bitmapToImageData(bmp);
+  const decodeImg = (imageData) => {
+    try { return decodeBitmapWithZXing(mod, imageData); } catch { return null; }
+  };
+
+  // Multi-scale center ROI pyramid to enlarge small QRs
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0);
+
+  const attempt = (sx, sy, sw, sh, scale) => {
+    const roi = ctx.getImageData(sx, sy, sw, sh);
+    const c = new OffscreenCanvas(sw * scale, sh * scale);
+    const cx = c.getContext('2d');
+    // Nearest-neighbor upscale to preserve module edges
+    cx.imageSmoothingEnabled = false;
+    cx.putImageData(roi, 0, 0);
+    const upscaled = new OffscreenCanvas(c.width, c.height);
+    const ux = upscaled.getContext('2d');
+    ux.imageSmoothingEnabled = false;
+    ux.drawImage(c, 0, 0, c.width, c.height);
+    return ux.getImageData(0, 0, upscaled.width, upscaled.height);
+  };
+
+  const W = canvas.width, H = canvas.height;
+  const sizes = [0.5, 0.7, 0.9, 1.0];
+  const scales = [1.5, 2.0, 2.5];
+  const rotations = [0, 90, 180, 270];
+
+  for (const r of rotations) {
+    let bmp = bitmap;
+    if (r !== 0) {
+      const rc = new OffscreenCanvas(W, H);
+      const rx = rc.getContext('2d');
+      rx.translate(W / 2, H / 2);
+      rx.rotate((r * Math.PI) / 180);
+      rx.drawImage(bitmap, -W / 2, -H / 2);
+      bmp = rc.transferToImageBitmap();
+    }
+    const id = makeImageData(bmp);
+    const baseText = decodeImg(id);
+    if (baseText) return baseText;
+
+    for (const sz of sizes) {
+      const sw = Math.floor(W * sz);
+      const sh = Math.floor(H * sz);
+      const sx = Math.max(0, Math.floor((W - sw) / 2));
+      const sy = Math.max(0, Math.floor((H - sh) / 2));
+      for (const sc of scales) {
+        const roiUpscaled = attempt(sx, sy, sw, sh, sc);
+        const t = decodeImg(roiUpscaled);
+        if (t) return t;
+      }
+    }
   }
-  // Try enhanced grayscale to help light/low-contrast
-  try {
-    const canvas = new OffscreenCanvas(img.width, img.height);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(bitmap, 0, 0);
-    let g = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    g = enhanceGray(g);
-    const text = decodeBitmapWithZXing(mod, g);
-    if (text) return text;
-  } catch {}
-  // Try center ROI upscale for very small QR (2x)
-  try {
-    const w = img.width, h = img.height;
-    const side = Math.floor(Math.min(w, h) * 0.6);
-    const sx = Math.floor((w - side) / 2);
-    const sy = Math.floor((h - side) / 2);
-    const canvas = new OffscreenCanvas(side * 2, side * 2);
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, side * 2, side * 2);
-    const roi = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const text = decodeBitmapWithZXing(mod, roi);
-    if (text) return text;
-  } catch {}
   return null;
 }
 

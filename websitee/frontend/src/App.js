@@ -85,6 +85,7 @@ function App() {
   const lastWorkerDecodeAtRef = useRef(0);
   const skipWorkerDecodeRef = useRef(false);
   const isZoomDraggingRef = useRef(false);
+  const workerIntervalRef = useRef(0);
 
   // Load users and cookies on mount (fast path)
   useEffect(() => {
@@ -283,9 +284,9 @@ function App() {
           handleQRScan(result.getText());
           closeCamera();
         } else {
-          // NotFoundException or other scan error: periodically try high-res worker decode
+          // No result: periodically attempt high-res worker decode regardless of error type
           const now = performance.now();
-          if (!skipWorkerDecodeRef.current && videoRef.current && now - lastWorkerDecodeAtRef.current > 350) {
+          if (!skipWorkerDecodeRef.current && videoRef.current && now - lastWorkerDecodeAtRef.current > 200) {
             lastWorkerDecodeAtRef.current = now;
             tryDecodeWithWorkerOnce();
           }
@@ -307,6 +308,12 @@ function App() {
             setScanningHint('QR Code detected! Processing...');
             handleQRScan(result.getText());
             closeCamera();
+          } else {
+            const now = performance.now();
+            if (!skipWorkerDecodeRef.current && videoRef.current && now - lastWorkerDecodeAtRef.current > 200) {
+              lastWorkerDecodeAtRef.current = now;
+              tryDecodeWithWorkerOnce();
+            }
           }
         });
       }).catch(fallbackErr => {
@@ -403,7 +410,14 @@ function App() {
     } catch {}
   };
 
-  // Prefer hardware zoom where supported; fallback to CSS scale
+  const applyCssZoom = (zoom) => {
+    if (videoRef.current) {
+      videoRef.current.style.transformOrigin = 'center center';
+      videoRef.current.style.transform = `scale(${zoom})`;
+    }
+  };
+
+  // Try to use hardware zoom if available, otherwise CSS
   const applyZoomToTrack = (zoom) => {
     try {
       const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
@@ -416,25 +430,15 @@ function App() {
     return false;
   };
 
-  const applyCssZoom = (zoom) => {
-    if (videoRef.current) {
-      videoRef.current.style.transformOrigin = 'center center';
-      videoRef.current.style.transform = `scale(${zoom})`;
-    }
-  };
-
   const applyZoom = (zoom) => {
     // During slider drag, use instant CSS zoom for zero lag
     skipWorkerDecodeRef.current = true;
-    // Try hardware zoom first
     const usedHardware = applyZoomToTrack(zoom);
-    if (usedHardware) {
-      // Clear CSS transform if hardware zoom is active
-      if (videoRef.current) videoRef.current.style.transform = '';
+    if (usedHardware && videoRef.current) {
+      // Clear CSS transform if hardware zoom applied
+      videoRef.current.style.transform = '';
     } else {
-      // Cap CSS zoom to reduce edge clipping
-      const cssZoom = Math.min(Math.max(zoom, 1), 2.0);
-      applyCssZoom(cssZoom);
+      applyCssZoom(zoom);
     }
     // Re-enable worker decodes soon to keep scanning responsive
     clearTimeout(applyZoom._t);
@@ -667,24 +671,18 @@ function App() {
                     {/* QR Scanner Container for HTML5 */}
                     {/* Removed HTML5 scanner container */}
                     
-                    {/* Video element for ZXing (wrapped to keep zoom cropped, not resizing layout) */}
-                    <div className="rounded-lg bg-black h-80 sm:h-96 w-full overflow-hidden relative">
+                    {/* Video element for ZXing (contain to avoid cropping quiet zone) */}
+                    <div className="rounded-lg bg-black h-80 sm:h-96 w-full relative">
                     <video 
                       ref={videoRef} 
-                        className="absolute inset-0 w-full h-full object-cover will-change-transform"
+                        className="absolute inset-0 w-full h-full object-contain will-change-transform"
                       autoPlay={true} 
                       muted={true} 
                       playsInline={true}
                     />
                     </div>
 
-                    {/* QR Scanning Frame with safe box (keeps finders inside) */}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="relative w-full h-full">
-                        {/* Safe inner box (no text): try to keep all 3 finders inside */}
-                        <div className="absolute inset-10 border border-white/40 rounded-md"></div>
-                      </div>
-                    </div>
+                    {/* Scanning frame removed to avoid encouraging edge cropping */}
 
                     {/* Scanning hint removed */}
 
