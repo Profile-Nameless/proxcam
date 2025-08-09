@@ -386,7 +386,6 @@ function App() {
       if (!bitmap) return;
 
       // Crop ROI based on on-screen box proportion (ROI_INSET_PCT)
-      const container = containerRef.current;
       let roiBitmap = bitmap;
       try {
         const inset = ROI_INSET_PCT / 100;
