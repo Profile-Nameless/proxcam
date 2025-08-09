@@ -654,14 +654,16 @@ function App() {
                     {/* QR Scanner Container for HTML5 */}
                     {/* Removed HTML5 scanner container */}
                     
-                    {/* Video element for ZXing */}
-                    <video 
-                      ref={videoRef} 
-                      className="rounded-lg object-cover bg-black transition-all duration-300 h-80 sm:h-96 w-full"
-                      autoPlay={true} 
-                      muted={true} 
-                      playsInline={true}
-                    />
+                    {/* Video element for ZXing (wrapped to keep zoom cropped, not resizing layout) */}
+                    <div className="rounded-lg bg-black h-80 sm:h-96 w-full overflow-hidden relative">
+                      <video 
+                        ref={videoRef} 
+                        className="absolute inset-0 w-full h-full object-cover will-change-transform"
+                        autoPlay={true} 
+                        muted={true} 
+                        playsInline={true}
+                      />
+                    </div>
 
                     {/* QR Scanning Frame */}
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
