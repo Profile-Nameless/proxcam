@@ -687,8 +687,12 @@ function App() {
                     {/* QR Scanner Container for HTML5 */}
                     {/* Removed HTML5 scanner container */}
                     
-                    {/* Video element for ZXing (contain to avoid cropping quiet zone) */}
-                    <div ref={containerRef} className="rounded-lg bg-black h-80 sm:h-96 w-full relative">
+                    {/* Video element for ZXing (fixed aspect ratio to avoid tall layout) */}
+                    <div
+                      ref={containerRef}
+                      className="rounded-lg bg-black w-full relative"
+                      style={{ aspectRatio: '4 / 3' }}
+                    >
                     <video 
                       ref={videoRef} 
                         className="absolute inset-0 w-full h-full object-contain will-change-transform"
