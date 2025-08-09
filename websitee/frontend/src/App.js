@@ -282,16 +282,13 @@ function App() {
           setScanningHint('QR Code detected! Processing...');
           handleQRScan(result.getText());
           closeCamera();
-        } else if (err && err.name !== 'NotFoundException') {
-          // keep scanning; ignore NotFoundException
-          // Trigger high-res worker decode every ~350ms
+        } else {
+          // NotFoundException or other scan error: periodically try high-res worker decode
           const now = performance.now();
           if (!skipWorkerDecodeRef.current && videoRef.current && now - lastWorkerDecodeAtRef.current > 350) {
             lastWorkerDecodeAtRef.current = now;
             tryDecodeWithWorkerOnce();
           }
-        } else {
-          // NotFoundException: continue
         }
       });
     }).catch(err => {
