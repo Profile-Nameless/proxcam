@@ -85,6 +85,8 @@ function App() {
   const lastWorkerDecodeAtRef = useRef(0);
   const skipWorkerDecodeRef = useRef(false);
   const isZoomDraggingRef = useRef(false);
+  const containerRef = useRef(null);
+  const ROI_INSET_PCT = 10; // percent inset used for ROI frame
 
   // Load users and cookies on mount (fast path)
   useEffect(() => {
@@ -362,24 +364,41 @@ function App() {
       if (!video) return;
       const track = video.srcObject?.getVideoTracks?.()[0];
       if (!track) return;
-      // Prefer ImageCapture for full-res frame if available
+      // Prefer ImageCapture for full-res frame if available; otherwise from video
       let bitmap = null;
+      let frameWidth = 0, frameHeight = 0;
       if ('ImageCapture' in window) {
         try {
           const capt = new window.ImageCapture(track);
           bitmap = await capt.grabFrame();
+          frameWidth = bitmap.width; frameHeight = bitmap.height;
         } catch {}
       }
       if (!bitmap) {
-        // Fallback: draw current video frame
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         bitmap = await createImageBitmap(canvas);
+        frameWidth = canvas.width; frameHeight = canvas.height;
       }
       if (!bitmap) return;
+
+      // Crop ROI based on on-screen box proportion (ROI_INSET_PCT)
+      const container = containerRef.current;
+      let roiBitmap = bitmap;
+      try {
+        const inset = ROI_INSET_PCT / 100;
+        const sx = Math.floor(frameWidth * inset);
+        const sy = Math.floor(frameHeight * inset);
+        const sw = Math.floor(frameWidth * (1 - inset * 2));
+        const sh = Math.floor(frameHeight * (1 - inset * 2));
+        const off = new OffscreenCanvas(sw, sh);
+        const ox = off.getContext('2d');
+        ox.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+        roiBitmap = off.transferToImageBitmap();
+      } catch {}
 
       const worker = new Worker(new URL('./qrWorker.js', import.meta.url), { type: 'module' });
       const result = await new Promise((resolve) => {
@@ -399,10 +418,9 @@ function App() {
             resolve(null);
           }
         };
-        worker.postMessage({ type: 'decode', bitmap }, [bitmap]);
+        worker.postMessage({ type: 'decode', bitmap: roiBitmap }, [roiBitmap]);
       });
       if (result) {
-        setScanningHint('QR Code detected! Processing...');
         handleQRScan(result);
         closeCamera();
       }
@@ -671,7 +689,7 @@ function App() {
                     {/* Removed HTML5 scanner container */}
                     
                     {/* Video element for ZXing (contain to avoid cropping quiet zone) */}
-                    <div className="rounded-lg bg-black h-80 sm:h-96 w-full relative">
+                    <div ref={containerRef} className="rounded-lg bg-black h-80 sm:h-96 w-full relative">
                     <video 
                       ref={videoRef} 
                         className="absolute inset-0 w-full h-full object-contain will-change-transform"
@@ -679,9 +697,17 @@ function App() {
                       muted={true} 
                       playsInline={true}
                     />
-                    </div>
+                        </div>
 
-                    {/* Scanning frame removed to avoid encouraging edge cropping */}
+                    {/* ROI guide (inside margins) */}
+                    <div className="absolute inset-0 pointer-events-none">
+                      <div className="absolute" style={{ inset: `${ROI_INSET_PCT}%` }}>
+                        <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-red-500/80 rounded-sm" />
+                        <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-red-500/80 rounded-sm" />
+                        <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-red-500/80 rounded-sm" />
+                        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-red-500/80 rounded-sm" />
+                      </div>
+                    </div>
 
                     {/* Scanning hint removed */}
 
