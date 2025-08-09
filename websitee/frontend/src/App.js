@@ -406,19 +406,6 @@ function App() {
     } catch {}
   };
 
-  // Zoom controls: prefer hardware zoom; fallback to CSS scale
-  const applyZoomToTrack = (zoom) => {
-    try {
-      const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
-      const capabilities = track?.getCapabilities?.();
-      if (capabilities && capabilities.zoom) {
-          track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
-        return true;
-      }
-    } catch {}
-    return false;
-  };
-
   const applyCssZoom = (zoom) => {
     if (videoRef.current) {
       videoRef.current.style.transformOrigin = 'center center';
@@ -437,13 +424,20 @@ function App() {
     }, 150);
   };
 
-  const commitHardwareZoom = (zoom) => {
-    const usedHardware = applyZoomToTrack(zoom);
-    if (usedHardware && videoRef.current) {
-      // If hardware zoom applied, remove CSS scaling to avoid double-zoom
-      videoRef.current.style.transform = '';
-    }
-    skipWorkerDecodeRef.current = false;
+  const handleZoomIn = () => {
+    setZoomLevel((prev) => {
+      const next = Math.min(prev + 0.1, 3);
+      applyZoom(next);
+      return next;
+    });
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel((prev) => {
+      const next = Math.max(prev - 0.1, 1);
+      applyZoom(next);
+      return next;
+    });
   };
 
   // Slider handles zoom directly; button handlers removed
@@ -656,13 +650,13 @@ function App() {
                     
                     {/* Video element for ZXing (wrapped to keep zoom cropped, not resizing layout) */}
                     <div className="rounded-lg bg-black h-80 sm:h-96 w-full overflow-hidden relative">
-                      <video 
-                        ref={videoRef} 
+                    <video 
+                      ref={videoRef} 
                         className="absolute inset-0 w-full h-full object-cover will-change-transform"
-                        autoPlay={true} 
-                        muted={true} 
-                        playsInline={true}
-                      />
+                      autoPlay={true} 
+                      muted={true} 
+                      playsInline={true}
+                    />
                     </div>
 
                     {/* QR Scanning Frame */}
@@ -681,29 +675,31 @@ function App() {
 
                     {/* Scanning hint removed */}
 
-                    {/* Zoom Slider */}
-                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-2/3 sm:w-1/2 px-4">
-                      <div className="bg-black/50 backdrop-blur rounded-lg px-3 py-2">
-                        <input
-                          type="range"
-                          min="1"
-                          max="3"
-                          step="0.05"
-                          value={zoomLevel}
-                          onMouseDown={() => { isZoomDraggingRef.current = true; skipWorkerDecodeRef.current = true; }}
-                          onTouchStart={() => { isZoomDraggingRef.current = true; skipWorkerDecodeRef.current = true; }}
-                          onChange={(e) => {
-                            const next = parseFloat(e.target.value);
-                            setZoomLevel(next);
-                            applyZoom(next);
-                          }}
-                          onMouseUp={() => { isZoomDraggingRef.current = false; commitHardwareZoom(zoomLevel); }}
-                          onTouchEnd={() => { isZoomDraggingRef.current = false; commitHardwareZoom(zoomLevel); }}
-                          className="range w-full"
-                          aria-label="Zoom"
-                        />
-                        <div className="text-center text-xs text-white mt-1">{Math.round(zoomLevel * 100)}%</div>
+                    {/* Zoom Buttons */}
+                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
+                      <button
+                        onClick={handleZoomIn}
+                        className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500 transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-black text-sm font-bold ml-1">+</span>
+                      </button>
+                      <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+                        {Math.round(zoomLevel * 100)}%
                       </div>
+                      <button
+                        onClick={handleZoomOut}
+                        className="w-12 h-12 bg-gray-400 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-500 transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-black text-sm font-bold ml-1">-</span>
+                      </button>
                     </div>
 
                     {/* Close Button */}
