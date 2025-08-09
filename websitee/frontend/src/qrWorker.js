@@ -37,61 +37,113 @@ function bitmapToImageData(bitmap) {
   return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
+function toGrayscale(img) {
+  const data = img.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const y = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
+    data[i] = data[i + 1] = data[i + 2] = y;
+  }
+  return img;
+}
+
+function contrastStretch(img) {
+  let min = 255, max = 0;
+  const data = img.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const v = data[i];
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  const span = Math.max(1, max - min);
+  for (let i = 0; i < data.length; i += 4) {
+    const v = ((data[i] - min) * 255) / span;
+    const vv = v | 0;
+    data[i] = data[i + 1] = data[i + 2] = vv;
+  }
+  return img;
+}
+
+function invert(img) {
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 255 - d[i];
+    d[i + 1] = 255 - d[i + 1];
+    d[i + 2] = 255 - d[i + 2];
+  }
+  return img;
+}
+
+function cropCenter(bitmap, scale = 0.8) {
+  const w = bitmap.width;
+  const h = bitmap.height;
+  const side = Math.floor(Math.min(w, h) * scale);
+  const sx = Math.floor((w - side) / 2);
+  const sy = Math.floor((h - side) / 2);
+  const canvas = new OffscreenCanvas(side, side);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, side, side);
+  return canvas.transferToImageBitmap();
+}
+
+function scaleBitmap(bitmap, factor = 2) {
+  const w = Math.max(1, Math.floor(bitmap.width * factor));
+  const h = Math.max(1, Math.floor(bitmap.height * factor));
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  return canvas.transferToImageBitmap();
+}
+
+function rotateBitmap(bitmap, deg) {
+  const rad = (deg * Math.PI) / 180;
+  const w = bitmap.width;
+  const h = bitmap.height;
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext('2d');
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(rad);
+  ctx.drawImage(bitmap, -w / 2, -h / 2);
+  return canvas.transferToImageBitmap();
+}
+
 async function tryDecode(bitmap) {
   const mod = await loadZXing();
   if (!mod) return null;
-  const makeImageData = (bmp) => bitmapToImageData(bmp);
-  const decodeImg = (imageData) => {
-    try { return decodeBitmapWithZXing(mod, imageData); } catch { return null; }
-  };
-
-  // Multi-scale center ROI pyramid to enlarge small QRs
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(bitmap, 0, 0);
-
-  const attempt = (sx, sy, sw, sh, scale) => {
-    const roi = ctx.getImageData(sx, sy, sw, sh);
-    const c = new OffscreenCanvas(sw * scale, sh * scale);
-    const cx = c.getContext('2d');
-    // Nearest-neighbor upscale to preserve module edges
-    cx.imageSmoothingEnabled = false;
-    cx.putImageData(roi, 0, 0);
-    const upscaled = new OffscreenCanvas(c.width, c.height);
-    const ux = upscaled.getContext('2d');
-    ux.imageSmoothingEnabled = false;
-    ux.drawImage(c, 0, 0, c.width, c.height);
-    return ux.getImageData(0, 0, upscaled.width, upscaled.height);
-  };
-
-  const W = canvas.width, H = canvas.height;
-  const sizes = [0.5, 0.7, 0.9, 1.0];
-  const scales = [1.5, 2.0, 2.5];
+  // Build a pyramid of candidates: [full, 0.8 center, 0.6 center] x [1x, 2x, 3x] x rotations x preprocessing
+  const centerScales = [1.0, 0.85, 0.7];
+  const upscales = [1.0, 1.8, 2.5];
   const rotations = [0, 90, 180, 270];
+  const preprocessors = [
+    (im) => im,
+    (im) => contrastStretch(toGrayscale(im)),
+    (im) => invert(contrastStretch(toGrayscale(im))),
+  ];
 
-  for (const r of rotations) {
+  for (const c of centerScales) {
     let bmp = bitmap;
-    if (r !== 0) {
-      const rc = new OffscreenCanvas(W, H);
-      const rx = rc.getContext('2d');
-      rx.translate(W / 2, H / 2);
-      rx.rotate((r * Math.PI) / 180);
-      rx.drawImage(bitmap, -W / 2, -H / 2);
-      bmp = rc.transferToImageBitmap();
+    if (c < 0.99) {
+      try { bmp = cropCenter(bitmap, c); } catch {}
     }
-    const id = makeImageData(bmp);
-    const baseText = decodeImg(id);
-    if (baseText) return baseText;
-
-    for (const sz of sizes) {
-      const sw = Math.floor(W * sz);
-      const sh = Math.floor(H * sz);
-      const sx = Math.max(0, Math.floor((W - sw) / 2));
-      const sy = Math.max(0, Math.floor((H - sh) / 2));
-      for (const sc of scales) {
-        const roiUpscaled = attempt(sx, sy, sw, sh, sc);
-        const t = decodeImg(roiUpscaled);
-        if (t) return t;
+    for (const rot of rotations) {
+      let rbmp = bmp;
+      if (rot !== 0) {
+        try { rbmp = rotateBitmap(bmp, rot); } catch {}
+      }
+      for (const s of upscales) {
+        let sbmp = rbmp;
+        if (s > 1.01) {
+          try { sbmp = scaleBitmap(rbmp, s); } catch {}
+        }
+        const base = bitmapToImageData(sbmp);
+        for (const prep of preprocessors) {
+          const img = new ImageData(new Uint8ClampedArray(base.data), base.width, base.height);
+          const prepped = prep(img);
+          try {
+            const text = decodeBitmapWithZXing(mod, prepped);
+            if (text) return text;
+          } catch {}
+        }
       }
     }
   }

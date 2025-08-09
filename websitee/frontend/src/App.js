@@ -85,8 +85,6 @@ function App() {
   const lastWorkerDecodeAtRef = useRef(0);
   const skipWorkerDecodeRef = useRef(false);
   const isZoomDraggingRef = useRef(false);
-  const containerRef = useRef(null);
-  const ROI_INSET_PCT = 10; // percent inset used for ROI frame
 
   // Load users and cookies on mount (fast path)
   useEffect(() => {
@@ -284,13 +282,16 @@ function App() {
           setScanningHint('QR Code detected! Processing...');
           handleQRScan(result.getText());
           closeCamera();
-        } else {
-          // No result: periodically attempt high-res worker decode regardless of error type
+        } else if (err && err.name !== 'NotFoundException') {
+          // keep scanning; ignore NotFoundException
+          // Trigger high-res worker decode every ~200ms for faster capture
           const now = performance.now();
           if (!skipWorkerDecodeRef.current && videoRef.current && now - lastWorkerDecodeAtRef.current > 200) {
             lastWorkerDecodeAtRef.current = now;
             tryDecodeWithWorkerOnce();
           }
+        } else {
+          // NotFoundException: continue
         }
       });
     }).catch(err => {
@@ -309,12 +310,6 @@ function App() {
             setScanningHint('QR Code detected! Processing...');
             handleQRScan(result.getText());
             closeCamera();
-          } else {
-            const now = performance.now();
-            if (!skipWorkerDecodeRef.current && videoRef.current && now - lastWorkerDecodeAtRef.current > 200) {
-              lastWorkerDecodeAtRef.current = now;
-              tryDecodeWithWorkerOnce();
-            }
           }
         });
       }).catch(fallbackErr => {
@@ -364,40 +359,24 @@ function App() {
       if (!video) return;
       const track = video.srcObject?.getVideoTracks?.()[0];
       if (!track) return;
-      // Prefer ImageCapture for full-res frame if available; otherwise from video
+      // Prefer ImageCapture for full-res frame if available
       let bitmap = null;
-      let frameWidth = 0, frameHeight = 0;
       if ('ImageCapture' in window) {
         try {
           const capt = new window.ImageCapture(track);
           bitmap = await capt.grabFrame();
-          frameWidth = bitmap.width; frameHeight = bitmap.height;
         } catch {}
       }
       if (!bitmap) {
+        // Fallback: draw current video frame
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         bitmap = await createImageBitmap(canvas);
-        frameWidth = canvas.width; frameHeight = canvas.height;
       }
       if (!bitmap) return;
-
-      // Crop ROI based on on-screen box proportion (ROI_INSET_PCT)
-      let roiBitmap = bitmap;
-      try {
-        const inset = ROI_INSET_PCT / 100;
-        const sx = Math.floor(frameWidth * inset);
-        const sy = Math.floor(frameHeight * inset);
-        const sw = Math.floor(frameWidth * (1 - inset * 2));
-        const sh = Math.floor(frameHeight * (1 - inset * 2));
-        const off = new OffscreenCanvas(sw, sh);
-        const ox = off.getContext('2d');
-        ox.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
-        roiBitmap = off.transferToImageBitmap();
-      } catch {}
 
       const worker = new Worker(new URL('./qrWorker.js', import.meta.url), { type: 'module' });
       const result = await new Promise((resolve) => {
@@ -417,9 +396,10 @@ function App() {
             resolve(null);
           }
         };
-        worker.postMessage({ type: 'decode', bitmap: roiBitmap }, [roiBitmap]);
+        worker.postMessage({ type: 'decode', bitmap }, [bitmap]);
       });
       if (result) {
+        setScanningHint('QR Code detected! Processing...');
         handleQRScan(result);
         closeCamera();
       }
@@ -433,29 +413,10 @@ function App() {
     }
   };
 
-  // Try to use hardware zoom if available, otherwise CSS
-  const applyZoomToTrack = (zoom) => {
-    try {
-      const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
-      const capabilities = track?.getCapabilities?.();
-      if (capabilities && capabilities.zoom) {
-        track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
-        return true;
-      }
-    } catch {}
-    return false;
-  };
-
   const applyZoom = (zoom) => {
     // During slider drag, use instant CSS zoom for zero lag
     skipWorkerDecodeRef.current = true;
-    const usedHardware = applyZoomToTrack(zoom);
-    if (usedHardware && videoRef.current) {
-      // Clear CSS transform if hardware zoom applied
-      videoRef.current.style.transform = '';
-    } else {
-      applyCssZoom(zoom);
-    }
+    applyCssZoom(zoom);
     // Re-enable worker decodes soon to keep scanning responsive
     clearTimeout(applyZoom._t);
     applyZoom._t = setTimeout(() => {
@@ -687,28 +648,28 @@ function App() {
                     {/* QR Scanner Container for HTML5 */}
                     {/* Removed HTML5 scanner container */}
                     
-                    {/* Video element for ZXing (fixed aspect ratio to avoid tall layout) */}
-                    <div
-                      ref={containerRef}
-                      className="rounded-lg bg-black w-full relative"
-                      style={{ aspectRatio: '4 / 3' }}
-                    >
+                    {/* Video element for ZXing (wrapped to keep zoom cropped, not resizing layout) */}
+                    <div className="rounded-lg bg-black h-80 sm:h-96 w-full overflow-hidden relative">
                     <video 
                       ref={videoRef} 
-                        className="absolute inset-0 w-full h-full object-contain will-change-transform"
+                        className="absolute inset-0 w-full h-full object-cover will-change-transform"
                       autoPlay={true} 
                       muted={true} 
                       playsInline={true}
                     />
-                        </div>
+                    </div>
 
-                    {/* ROI guide (inside margins) */}
-                    <div className="absolute inset-0 pointer-events-none">
-                      <div className="absolute" style={{ inset: `${ROI_INSET_PCT}%` }}>
-                        <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-red-500/80 rounded-sm" />
-                        <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-red-500/80 rounded-sm" />
-                        <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-red-500/80 rounded-sm" />
-                        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-red-500/80 rounded-sm" />
+                    {/* QR Scanning Frame */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="relative w-full h-full">
+                        {/* Red dotted border with L-shaped corners */}
+                        <div className="absolute inset-4 border-2 border-red-500 border-dashed">
+                          {/* L-shaped corners */}
+                          <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-red-500"></div>
+                          <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-red-500"></div>
+                          <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-red-500"></div>
+                          <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-red-500"></div>
+                        </div>
                       </div>
                     </div>
 
