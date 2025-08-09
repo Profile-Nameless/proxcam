@@ -37,6 +37,29 @@ function bitmapToImageData(bitmap) {
   return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
+function enhanceGray(imgData) {
+  // Convert to grayscale + local contrast boost (simple CLAHE-like)
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const y = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0;
+    d[i] = d[i + 1] = d[i + 2] = y;
+  }
+  // Normalize histogram
+  let min = 255, max = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = d[i];
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  const span = Math.max(1, max - min);
+  for (let i = 0; i < d.length; i += 4) {
+    const v = ((d[i] - min) * 255) / span;
+    const vv = v | 0;
+    d[i] = d[i + 1] = d[i + 2] = vv;
+  }
+  return imgData;
+}
+
 async function tryDecode(bitmap) {
   const mod = await loadZXing();
   if (!mod) return null;
@@ -60,6 +83,31 @@ async function tryDecode(bitmap) {
       if (text) return text;
     } catch {}
   }
+  // Try enhanced grayscale to help light/low-contrast
+  try {
+    const canvas = new OffscreenCanvas(img.width, img.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    let g = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    g = enhanceGray(g);
+    const text = decodeBitmapWithZXing(mod, g);
+    if (text) return text;
+  } catch {}
+  // Try center ROI upscale for very small QR (2x)
+  try {
+    const w = img.width, h = img.height;
+    const side = Math.floor(Math.min(w, h) * 0.6);
+    const sx = Math.floor((w - side) / 2);
+    const sy = Math.floor((h - side) / 2);
+    const canvas = new OffscreenCanvas(side * 2, side * 2);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, side * 2, side * 2);
+    const roi = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const text = decodeBitmapWithZXing(mod, roi);
+    if (text) return text;
+  } catch {}
   return null;
 }
 
