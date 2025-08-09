@@ -85,7 +85,6 @@ function App() {
   const lastWorkerDecodeAtRef = useRef(0);
   const skipWorkerDecodeRef = useRef(false);
   const isZoomDraggingRef = useRef(false);
-  const workerIntervalRef = useRef(0);
 
   // Load users and cookies on mount (fast path)
   useEffect(() => {
