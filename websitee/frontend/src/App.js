@@ -83,6 +83,7 @@ function App() {
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
   const lastWorkerDecodeAtRef = useRef(0);
+  const skipWorkerDecodeRef = useRef(false);
 
   // Load users and cookies on mount (fast path)
   useEffect(() => {
@@ -284,7 +285,7 @@ function App() {
           // keep scanning; ignore NotFoundException
           // Trigger high-res worker decode every ~350ms
           const now = performance.now();
-          if (videoRef.current && now - lastWorkerDecodeAtRef.current > 350) {
+          if (!skipWorkerDecodeRef.current && videoRef.current && now - lastWorkerDecodeAtRef.current > 350) {
             lastWorkerDecodeAtRef.current = now;
             tryDecodeWithWorkerOnce();
           }
@@ -418,11 +419,18 @@ function App() {
   };
 
   const applyZoom = (zoom) => {
+    // During active slider drag, skip worker decodes for smoothness
+    skipWorkerDecodeRef.current = true;
     const usedHardware = applyZoomToTrack(zoom);
     if (!usedHardware && videoRef.current) {
       videoRef.current.style.transformOrigin = 'center center';
       videoRef.current.style.transform = `scale(${zoom})`;
     }
+    // Re-enable worker decodes on next tick
+    clearTimeout(applyZoom._t);
+    applyZoom._t = setTimeout(() => {
+      skipWorkerDecodeRef.current = false;
+    }, 120);
   };
 
   // Slider handles zoom directly; button handlers removed
