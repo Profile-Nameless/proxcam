@@ -406,6 +406,19 @@ function App() {
     } catch {}
   };
 
+  // Prefer hardware zoom where supported; fallback to CSS scale
+  const applyZoomToTrack = (zoom) => {
+    try {
+      const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
+      const capabilities = track?.getCapabilities?.();
+      if (capabilities && capabilities.zoom) {
+        track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
+        return true;
+      }
+    } catch {}
+    return false;
+  };
+
   const applyCssZoom = (zoom) => {
     if (videoRef.current) {
       videoRef.current.style.transformOrigin = 'center center';
@@ -416,7 +429,16 @@ function App() {
   const applyZoom = (zoom) => {
     // During slider drag, use instant CSS zoom for zero lag
     skipWorkerDecodeRef.current = true;
-    applyCssZoom(zoom);
+    // Try hardware zoom first
+    const usedHardware = applyZoomToTrack(zoom);
+    if (usedHardware) {
+      // Clear CSS transform if hardware zoom is active
+      if (videoRef.current) videoRef.current.style.transform = '';
+    } else {
+      // Cap CSS zoom to reduce edge clipping
+      const cssZoom = Math.min(Math.max(zoom, 1), 2.0);
+      applyCssZoom(cssZoom);
+    }
     // Re-enable worker decodes soon to keep scanning responsive
     clearTimeout(applyZoom._t);
     applyZoom._t = setTimeout(() => {
@@ -659,17 +681,11 @@ function App() {
                     />
                     </div>
 
-                    {/* QR Scanning Frame */}
+                    {/* QR Scanning Frame with safe box (keeps finders inside) */}
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                       <div className="relative w-full h-full">
-                        {/* Red dotted border with L-shaped corners */}
-                        <div className="absolute inset-4 border-2 border-red-500 border-dashed">
-                          {/* L-shaped corners */}
-                          <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-red-500"></div>
-                          <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-red-500"></div>
-                          <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-red-500"></div>
-                          <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-red-500"></div>
-                        </div>
+                        {/* Safe inner box (no text): try to keep all 3 finders inside */}
+                        <div className="absolute inset-10 border border-white/40 rounded-md"></div>
                       </div>
                     </div>
 
