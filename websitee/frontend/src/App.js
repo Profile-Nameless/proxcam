@@ -82,9 +82,6 @@ function App() {
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
-  const lastWorkerDecodeAtRef = useRef(0);
-  const skipWorkerDecodeRef = useRef(false);
-  const isZoomDraggingRef = useRef(false);
 
   // Load users and cookies on mount (fast path)
   useEffect(() => {
@@ -245,10 +242,31 @@ function App() {
     startZxingScanner();
   };
 
-  const startZxingScanner = () => {
-    console.log('📱 Starting ZXing QR Scanner (simple mode) + WASM worker fallback...');
+  const loadZXingCdn = () => {
+    return new Promise((resolve) => {
+      if (window.ZXing) return resolve(window.ZXing);
+      const existing = document.querySelector('script[data-zxing-cdn]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.ZXing));
+        existing.addEventListener('error', () => resolve(null));
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/@zxing/library@latest';
+      script.async = true;
+      script.setAttribute('data-zxing-cdn', 'true');
+      script.onload = () => resolve(window.ZXing);
+      script.onerror = () => resolve(null);
+      document.head.appendChild(script);
+    });
+  };
+
+  const startZxingScanner = async () => {
+    console.log('📱 Starting ZXing QR Scanner...');
     
-    codeReader.current = new BrowserMultiFormatReader();
+    const ZX = await loadZXingCdn();
+    const ReaderClass = ZX?.BrowserMultiFormatReader || BrowserMultiFormatReader;
+    codeReader.current = new ReaderClass();
     
     // Prefer high resolution (up to 4K) when supported
     const constraints = {
@@ -282,14 +300,6 @@ function App() {
           setScanningHint('QR Code detected! Processing...');
           handleQRScan(result.getText());
           closeCamera();
-        } else if (err && err.name !== 'NotFoundException') {
-          // keep scanning; ignore NotFoundException
-          // Trigger high-res worker decode every ~200ms for faster capture
-          const now = performance.now();
-          if (!skipWorkerDecodeRef.current && videoRef.current && now - lastWorkerDecodeAtRef.current > 200) {
-            lastWorkerDecodeAtRef.current = now;
-            tryDecodeWithWorkerOnce();
-          }
         } else {
           // NotFoundException: continue
         }
@@ -352,59 +362,7 @@ function App() {
     setScanningHint('');
   };
 
-  // One-shot decode using a Web Worker + ZXing WASM from a high-res frame
-  const tryDecodeWithWorkerOnce = async () => {
-    try {
-      const video = videoRef.current;
-      if (!video) return;
-      const track = video.srcObject?.getVideoTracks?.()[0];
-      if (!track) return;
-      // Prefer ImageCapture for full-res frame if available
-      let bitmap = null;
-      if ('ImageCapture' in window) {
-        try {
-          const capt = new window.ImageCapture(track);
-          bitmap = await capt.grabFrame();
-        } catch {}
-      }
-      if (!bitmap) {
-        // Fallback: draw current video frame
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        bitmap = await createImageBitmap(canvas);
-      }
-      if (!bitmap) return;
-
-      const worker = new Worker(new URL('./qrWorker.js', import.meta.url), { type: 'module' });
-      const result = await new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          try { worker.terminate(); } catch {}
-          resolve(null);
-        }, 2000);
-        worker.onmessage = (ev) => {
-          const data = ev.data || {};
-          if (data.type === 'result') {
-            clearTimeout(timer);
-            try { worker.terminate(); } catch {}
-            resolve(data.text || null);
-          } else if (data.type === 'none' || data.type === 'error') {
-            clearTimeout(timer);
-            try { worker.terminate(); } catch {}
-            resolve(null);
-          }
-        };
-        worker.postMessage({ type: 'decode', bitmap }, [bitmap]);
-      });
-      if (result) {
-        setScanningHint('QR Code detected! Processing...');
-        handleQRScan(result);
-        closeCamera();
-      }
-    } catch {}
-  };
+  // Removed WASM worker path for now (reworking processing)
 
   const applyCssZoom = (zoom) => {
     if (videoRef.current) {
