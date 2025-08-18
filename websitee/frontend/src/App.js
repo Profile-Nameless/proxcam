@@ -77,13 +77,9 @@ function App() {
   const [showAddUserButton, setShowAddUserButton] = useState(false);
   const dateTapCountRef = useRef(0);
   const [, setScanningHint] = useState('');
-  const [zoomLevel, setZoomLevel] = useState(1);
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
-  const [currentCameraId, setCurrentCameraId] = useState('');
-  const [hasTorch, setHasTorch] = useState(false);
-  const [isTorchOn, setIsTorchOn] = useState(false);
   const scanAudioRef = useRef(null);
   
 
@@ -223,7 +219,6 @@ function App() {
     setIsCameraOpen(true);
     setAttendanceResults([]);
     setScanningHint('Initializing camera...');
-    setZoomLevel(1);
     setTimeout(() => {
       startScanner();
     }, 300);
@@ -303,14 +298,13 @@ function App() {
       try { await qrScannerRef.current.setGrayscaleWeights(77, 150, 29, true); } catch {}
       // Try setting environment camera explicitly before listing
       try { await qrScannerRef.current.setCamera('environment'); } catch {}
-      // Prefer explicit back camera by deviceId if available and record list
+      // Prefer explicit back camera by deviceId if available
       try {
         const list = await window.QrScanner.listCameras(true);
         if (Array.isArray(list) && list.length) {
           const back = list.find(c => /back|rear|environment/i.test(c.label)) || list[list.length - 1];
           if (back?.id) {
             await qrScannerRef.current.setCamera(back.id);
-            setCurrentCameraId(back.id);
           }
         }
       } catch {}
@@ -319,8 +313,6 @@ function App() {
       await ensureVideoPlaying();
       // If the video didn't render yet, unhide again
       if (videoRef.current) videoRef.current.classList.remove('hidden');
-      // Torch capability
-      try { const torchCap = await qrScannerRef.current.hasFlash(); setHasTorch(!!torchCap); setIsTorchOn(false);} catch {}
       console.log('✅ QrScanner started');
     } catch (e) {
       console.error('Failed to start QrScanner', e);
@@ -390,64 +382,16 @@ function App() {
 
   // Removed WASM worker path for now (reworking processing)
 
-  const applyZoom = (zoom) => {
-    // Prefer hardware zoom; fallback to CSS only if capability is missing
-    const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
-    const capabilities = track?.getCapabilities?.();
-    if (capabilities && capabilities.zoom) {
-      track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
-      // Clear CSS transform if previously set
-      if (videoRef.current) videoRef.current.style.transform = '';
-    } else if (videoRef.current) {
-      videoRef.current.style.transformOrigin = 'center center';
-      videoRef.current.style.transform = `scale(${zoom})`;
-    }
-  };
+  const applyZoom = () => {};
 
   // Camera controls inside scanner UI
-  const switchCamera = async () => {
-    try {
-      if (!qrScannerRef.current) return;
-      const list = await window.QrScanner.listCameras(true);
-      if (!Array.isArray(list) || list.length === 0) return;
-      const currentIdx = Math.max(0, list.findIndex((c) => c.id === currentCameraId));
-      const next = list[(currentIdx + 1) % list.length];
-      await qrScannerRef.current.setCamera(next.id);
-      setCurrentCameraId(next.id);
-      try { setHasTorch(!!(await qrScannerRef.current.hasFlash())); setIsTorchOn(false); } catch {}
-    } catch {}
-  };
+  const switchCamera = async () => {};
 
-  const toggleTorch = async () => {
-    try {
-      if (!qrScannerRef.current) return;
-      const supported = await qrScannerRef.current.hasFlash();
-      if (!supported) { setHasTorch(false); return; }
-      if (isTorchOn) {
-        await qrScannerRef.current.turnFlashOff();
-        setIsTorchOn(false);
-      } else {
-        await qrScannerRef.current.turnFlashOn();
-        setIsTorchOn(true);
-      }
-    } catch {}
-  };
+  const toggleTorch = async () => {};
 
-  const handleZoomIn = () => {
-    setZoomLevel((prev) => {
-      const next = Math.min(prev + 0.1, 3);
-      applyZoom(next);
-      return next;
-    });
-  };
+  const handleZoomIn = () => {};
 
-  const handleZoomOut = () => {
-    setZoomLevel((prev) => {
-      const next = Math.max(prev - 0.1, 1);
-      applyZoom(next);
-      return next;
-    });
-  };
+  const handleZoomOut = () => {};
 
   // Slider handles zoom directly; button handlers removed
 
