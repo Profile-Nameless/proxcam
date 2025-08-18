@@ -78,6 +78,7 @@ function App() {
   const dateTapCountRef = useRef(0);
   const [, setScanningHint] = useState('');
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [currentCameraId, setCurrentCameraId] = useState('');
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
@@ -306,6 +307,7 @@ function App() {
           const back = list.find(c => /back|rear|environment/i.test(c.label)) || list[list.length - 1];
           if (back?.id) {
             await qrScannerRef.current.setCamera(back.id);
+            setCurrentCameraId(back.id);
           }
         }
       } catch {}
@@ -321,6 +323,45 @@ function App() {
         } catch (err) {
           console.warn('Secondary manual stream failed:', err);
         }
+      }
+      // If still black, switch to front camera as a fallback
+      if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0)) {
+        try {
+          await qrScannerRef.current.setCamera('user');
+          await ensureVideoPlaying();
+        } catch {}
+        if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0)) {
+          try {
+            const manualFront = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+            videoRef.current.srcObject = manualFront;
+            await ensureVideoPlaying();
+          } catch {}
+        }
+      }
+      // If still black, brute-force try deviceIds
+      if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0)) {
+        try {
+          const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+          for (const dev of devices) {
+            try {
+              await qrScannerRef.current.setCamera(dev.deviceId);
+              await ensureVideoPlaying();
+              if (videoRef.current.videoWidth && videoRef.current.videoWidth > 0) {
+                setCurrentCameraId(dev.deviceId || '');
+                break;
+              }
+            } catch {}
+            try {
+              const manualDev = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: dev.deviceId } }, audio: false });
+              videoRef.current.srcObject = manualDev;
+              await ensureVideoPlaying();
+              if (videoRef.current.videoWidth && videoRef.current.videoWidth > 0) {
+                setCurrentCameraId(dev.deviceId || '');
+                break;
+              }
+            } catch {}
+          }
+        } catch {}
       }
       // If the video didn't render yet, unhide again
       if (videoRef.current) videoRef.current.classList.remove('hidden');
@@ -419,6 +460,19 @@ function App() {
       applyZoom(next);
       return next;
     });
+  };
+
+  const switchCamera = async () => {
+    try {
+      if (!qrScannerRef.current) return;
+      const list = await window.QrScanner.listCameras(true);
+      if (!Array.isArray(list) || list.length === 0) return;
+      const idx = Math.max(0, list.findIndex((c) => c.id === currentCameraId));
+      const next = list[(idx + 1) % list.length];
+      await qrScannerRef.current.setCamera(next.id || next.label || 'environment');
+      setCurrentCameraId(next.id || '');
+      await ensureVideoPlaying();
+    } catch {}
   };
 
   // Camera controls inside scanner UI
@@ -703,6 +757,7 @@ function App() {
                         </svg>
                         <span className="text-black text-sm font-bold ml-1">-</span>
                       </button>
+                      <button onClick={switchCamera} className="mt-1 px-3 py-1 bg-white/20 text-white rounded text-xs">Switch</button>
                     </div>
 
                     {/* Stop Scanning Button (full width) */}
