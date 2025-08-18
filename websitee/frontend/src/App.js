@@ -261,15 +261,7 @@ function App() {
     }
     try { QrScannerLib.WORKER_PATH = 'https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js'; } catch {}
     
-    // Stable, compatible constraints similar to the reference site
-    const constraints = {
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 30, min: 15 },
-      }
-    };
+    // Using qr-scanner defaults; no explicit getUserMedia constraints here
 
     try {
       if (qrScannerRef.current) await qrScannerRef.current.stop();
