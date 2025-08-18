@@ -81,10 +81,10 @@ function App() {
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
-  const [cameras, setCameras] = useState([]);
   const [currentCameraId, setCurrentCameraId] = useState('');
   const [hasTorch, setHasTorch] = useState(false);
   const [isTorchOn, setIsTorchOn] = useState(false);
+  const scanAudioRef = useRef(null);
   
 
   // Load users and cookies on mount (fast path)
@@ -263,9 +263,9 @@ function App() {
       console.error('Failed to load qr-scanner');
       return;
     }
-    try { QrScannerLib.WORKER_PATH = 'https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js'; } catch {}
+    try { QrScannerLib.WORKER_PATH = '/qr-scanner-worker.min.js'; } catch {}
     // Ensure video is visible before starting (in case it was hidden after a prior scan)
-    if (videoRef.current) {
+      if (videoRef.current) {
       try { videoRef.current.classList.remove('hidden'); } catch {}
     }
     
@@ -284,11 +284,13 @@ function App() {
         },
         { preferredCamera: 'environment', highlightScanRegion: true, highlightCodeOutline: true, maxScansPerSecond: 30, returnDetailedScanResult: true }
       );
+      // Match reference decoder behavior
+      try { await qrScannerRef.current.setInversionMode('both'); } catch {}
+      try { await qrScannerRef.current.setGrayscaleWeights(77, 150, 29, true); } catch {}
       // Prefer explicit back camera by deviceId if available and record list
       try {
         const list = await window.QrScanner.listCameras(true);
         if (Array.isArray(list) && list.length) {
-          setCameras(list);
           const back = list.find(c => /back|rear|environment/i.test(c.label)) || list[list.length - 1];
           if (back?.id) {
             await qrScannerRef.current.setCamera(back.id);
@@ -415,6 +417,8 @@ function App() {
 
   const handleQRScan = async (qrData) => {
     if (isProcessingScan) return; // prevent duplicate scans while processing
+    // play scan sound (with fallback tone)
+    try { await scanAudioRef.current?.play(); } catch (_) { try { playBeep(); } catch {} }
     setShowQRScannedPopup(true);
     setTimeout(() => setShowQRScannedPopup(false), 2000);
     try {
@@ -485,6 +489,26 @@ function App() {
     }
   };
 
+  const playBeep = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = 880;
+      o.connect(g);
+      g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+      o.start();
+      setTimeout(() => {
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.02);
+        o.stop();
+        ctx.close();
+      }, 120);
+    } catch {}
+  };
+
   const AddUserModal = () => (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white p-6 rounded-lg w-full max-w-sm mx-auto">
@@ -537,6 +561,8 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Scan sound */}
+      <audio ref={scanAudioRef} preload="auto" src="/scan.mp3" />
       {showQRScannedPopup && (
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 text-lg font-semibold animate-fade-in">
           QR scanned
@@ -616,19 +642,7 @@ function App() {
                     />
                     </div>
 
-                    {/* QR Scanning Frame */}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="relative w-full h-full">
-                        {/* Red dotted border with L-shaped corners */}
-                        <div className="absolute inset-4 border-2 border-red-500 border-dashed">
-                          {/* L-shaped corners */}
-                          <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-red-500"></div>
-                          <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-red-500"></div>
-                          <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-red-500"></div>
-                          <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-red-500"></div>
-                        </div>
-                      </div>
-                    </div>
+                    {/* Built-in QrScanner overlay will draw region and outline */}
 
                     {/* Scanning hint removed */}
 
@@ -660,7 +674,7 @@ function App() {
                       <div className="flex gap-2 mt-1">
                         <button onClick={switchCamera} className="px-2 py-1 bg-white/20 text-white rounded text-xs">Switch</button>
                         <button onClick={toggleTorch} className={`px-2 py-1 rounded text-xs ${isTorchOn ? 'bg-yellow-400 text-black' : 'bg-white/20 text-white'}`}>{isTorchOn ? 'Torch On' : 'Torch Off'}</button>
-                      </div>
+                    </div>
                     </div>
 
                     {/* Close Button */}
