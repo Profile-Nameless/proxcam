@@ -494,18 +494,7 @@ function App() {
     });
   };
 
-  const switchCamera = async () => {
-    try {
-      if (!qrScannerRef.current) return;
-      const list = await window.QrScanner.listCameras(true);
-      if (!Array.isArray(list) || list.length === 0) return;
-      const idx = Math.max(0, list.findIndex((c) => c.id === currentCameraId));
-      const next = list[(idx + 1) % list.length];
-      await qrScannerRef.current.setCamera(next.id || next.label || 'environment');
-      setCurrentCameraId(next.id || '');
-      await ensureVideoPlaying();
-    } catch {}
-  };
+  
 
   // Camera controls inside scanner UI
   
