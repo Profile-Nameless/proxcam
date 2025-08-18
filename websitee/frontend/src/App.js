@@ -382,16 +382,16 @@ function App() {
 
   // Removed WASM worker path for now (reworking processing)
 
-  const applyZoom = () => {};
+  
 
   // Camera controls inside scanner UI
-  const switchCamera = async () => {};
+  
 
-  const toggleTorch = async () => {};
+  
 
-  const handleZoomIn = () => {};
+  
 
-  const handleZoomOut = () => {};
+  
 
   // Slider handles zoom directly; button handlers removed
 
