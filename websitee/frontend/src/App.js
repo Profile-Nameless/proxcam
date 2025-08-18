@@ -136,8 +136,8 @@ function App() {
   useEffect(() => {
     const videoElement = videoRef.current;
     return () => {
-      if (codeReader.current) {
-        codeReader.current.reset();
+      if (qrScannerRef.current) {
+        try { qrScannerRef.current.stop(); } catch {}
       }
       if (videoElement && videoElement.srcObject) {
         const stream = videoElement.srcObject;
