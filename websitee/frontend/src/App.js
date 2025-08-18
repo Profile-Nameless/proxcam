@@ -243,7 +243,21 @@ function App() {
     }
     
     console.log('🔍 Initializing QR scanner...');
-    startZxingScanner();
+    ensureCameraAccess().then(startZxingScanner);
+  };
+
+  const ensureCameraAccess = async () => {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) return;
+      // HTTPS requirement (except localhost)
+      const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+      if (!isSecure) return;
+      // Probe to trigger permission prompt once
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      try { stream.getTracks().forEach(t => t.stop()); } catch {}
+    } catch (e) {
+      console.warn('Camera permission probe failed or denied:', e);
+    }
   };
 
   const loadQrScannerCdn = () => new Promise((resolve) => {
