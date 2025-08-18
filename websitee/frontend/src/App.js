@@ -322,8 +322,8 @@ function App() {
       // Match reference decoder behavior
       try { await qrScannerRef.current.setInversionMode('both'); } catch {}
       try { await qrScannerRef.current.setGrayscaleWeights(77, 150, 29, true); } catch {}
-      // Try setting environment camera explicitly before listing
-      try { await qrScannerRef.current.setCamera('environment'); } catch {}
+      // Try setting environment camera explicitly before listing (some browsers require exact constraint)
+      try { await qrScannerRef.current.setCamera({ facingMode: { exact: 'environment' } }); } catch {}
       // Prefer explicit back camera by deviceId if available
       try {
         const list = await window.QrScanner.listCameras(true);
@@ -431,7 +431,7 @@ function App() {
       };
       vid.addEventListener('canplay', onCanPlay, { once: true });
       vid.addEventListener('loadeddata', onLoadedData, { once: true });
-      setTimeout(() => onReady(), 1500);
+      setTimeout(() => onReady(), 5000);
     });
   };
 
@@ -789,7 +789,7 @@ function App() {
                         </svg>
                         <span className="text-black text-sm font-bold ml-1">-</span>
                       </button>
-                      <button onClick={switchCamera} className="mt-1 px-3 py-1 bg-white/20 text-white rounded text-xs">Switch</button>
+                      {/* Switch removed per request */}
                     </div>
 
                     {/* Stop Scanning Button (full width) */}
