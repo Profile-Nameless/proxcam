@@ -82,6 +82,8 @@ function App() {
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
+  const workerRef = useRef(null);
+  const workerLoopRef = useRef(0);
 
   // Load users and cookies on mount (fast path)
   useEffect(() => {
@@ -297,10 +299,47 @@ function App() {
             videoRef.current.classList.add('hidden');
             // Do not abruptly stop tracks; let UI finish
           }
+          // Stop worker loop
+          if (workerLoopRef.current) cancelAnimationFrame(workerLoopRef.current);
+          if (workerRef.current) { try { workerRef.current.postMessage({ type: 'close' }); } catch {} }
         } else {
           // NotFoundException: continue
         }
       });
+
+      // Kick off robust worker decoding in parallel (every ~200ms)
+      if (!workerRef.current) {
+        workerRef.current = new Worker(new URL('./qrWorker.js', import.meta.url), { type: 'module' });
+        workerRef.current.onmessage = (ev) => {
+          const data = ev.data || {};
+          if (data.type === 'qrResult' && data.data) {
+            try { codeReader.current?.reset?.(); } catch {}
+            if (videoRef.current) videoRef.current.classList.add('hidden');
+            handleQRScan(data.data);
+            // stop loop
+            if (workerLoopRef.current) cancelAnimationFrame(workerLoopRef.current);
+          }
+        };
+      }
+      const captureAndSend = async () => {
+        if (!videoRef.current) return;
+        try {
+          const v = videoRef.current;
+          const w = v.videoWidth || 640;
+          const h = v.videoHeight || 480;
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(v, 0, 0, w, h);
+          const bitmap = await createImageBitmap(canvas);
+          workerRef.current?.postMessage({ type: 'decode', bitmap }, [bitmap]);
+        } catch {}
+        // Schedule next
+        workerLoopRef.current = requestAnimationFrame(captureAndSend);
+      };
+      // Start loop
+      if (workerLoopRef.current) cancelAnimationFrame(workerLoopRef.current);
+      workerLoopRef.current = requestAnimationFrame(captureAndSend);
     }).catch(err => {
       console.error('❌ Failed to get camera stream:', err);
       
