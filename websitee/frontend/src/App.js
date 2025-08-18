@@ -81,6 +81,10 @@ function App() {
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
+  const [cameras, setCameras] = useState([]);
+  const [currentCameraId, setCurrentCameraId] = useState('');
+  const [hasTorch, setHasTorch] = useState(false);
+  const [isTorchOn, setIsTorchOn] = useState(false);
   
 
   // Load users and cookies on mount (fast path)
@@ -278,9 +282,25 @@ function App() {
           try { qrScannerRef.current?.stop(); } catch {}
           if (videoRef.current) videoRef.current.classList.add('hidden');
         },
-        { preferredCamera: 'environment', highlightScanRegion: true, highlightCodeOutline: true, maxScansPerSecond: 30 }
+        { preferredCamera: 'environment', highlightScanRegion: true, highlightCodeOutline: true, maxScansPerSecond: 30, returnDetailedScanResult: true }
       );
+      // Prefer explicit back camera by deviceId if available and record list
+      try {
+        const list = await window.QrScanner.listCameras(true);
+        if (Array.isArray(list) && list.length) {
+          setCameras(list);
+          const back = list.find(c => /back|rear|environment/i.test(c.label)) || list[list.length - 1];
+          if (back?.id) {
+            await qrScannerRef.current.setCamera(back.id);
+            setCurrentCameraId(back.id);
+          }
+        }
+      } catch {}
       await qrScannerRef.current.start();
+      // If the video didn't render yet, unhide again
+      if (videoRef.current) videoRef.current.classList.remove('hidden');
+      // Torch capability
+      try { const torchCap = await qrScannerRef.current.hasFlash(); setHasTorch(!!torchCap); setIsTorchOn(false);} catch {}
       console.log('✅ QrScanner started');
     } catch (e) {
       console.error('Failed to start QrScanner', e);
