@@ -260,6 +260,10 @@ function App() {
       return;
     }
     try { QrScannerLib.WORKER_PATH = 'https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js'; } catch {}
+    // Ensure video is visible before starting (in case it was hidden after a prior scan)
+    if (videoRef.current) {
+      try { videoRef.current.classList.remove('hidden'); } catch {}
+    }
     
     // Using qr-scanner defaults; no explicit getUserMedia constraints here
 
@@ -274,7 +278,7 @@ function App() {
           try { qrScannerRef.current?.stop(); } catch {}
           if (videoRef.current) videoRef.current.classList.add('hidden');
         },
-        { preferredCamera: 'environment', highlightScanRegion: false }
+        { preferredCamera: 'environment', highlightScanRegion: true, highlightCodeOutline: true, maxScansPerSecond: 30 }
       );
       await qrScannerRef.current.start();
       console.log('✅ QrScanner started');
@@ -294,6 +298,7 @@ function App() {
   const stopScanner = () => {
     console.log('⏹️ Stopping scanner...');
     if (qrScannerRef.current) { try { qrScannerRef.current.stop(); } catch {} qrScannerRef.current = null; }
+    if (videoRef.current) { try { videoRef.current.classList.remove('hidden'); } catch {} }
     
     // Clean up video stream
     if (videoRef.current && videoRef.current.srcObject) {
