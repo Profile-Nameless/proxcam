@@ -301,6 +301,8 @@ function App() {
       // Match reference decoder behavior
       try { await qrScannerRef.current.setInversionMode('both'); } catch {}
       try { await qrScannerRef.current.setGrayscaleWeights(77, 150, 29, true); } catch {}
+      // Try setting environment camera explicitly before listing
+      try { await qrScannerRef.current.setCamera('environment'); } catch {}
       // Prefer explicit back camera by deviceId if available and record list
       try {
         const list = await window.QrScanner.listCameras(true);
@@ -313,6 +315,8 @@ function App() {
         }
       } catch {}
       await qrScannerRef.current.start();
+      // Force play and wait for video to be rendering
+      await ensureVideoPlaying();
       // If the video didn't render yet, unhide again
       if (videoRef.current) videoRef.current.classList.remove('hidden');
       // Torch capability
@@ -320,7 +324,39 @@ function App() {
       console.log('✅ QrScanner started');
     } catch (e) {
       console.error('Failed to start QrScanner', e);
+      // Fallback: try manual getUserMedia to attach a stream so video isn't black
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await ensureVideoPlaying();
+        }
+        // Try starting scanner again (it will take over the stream)
+        try { await qrScannerRef.current?.start(); await ensureVideoPlaying(); } catch {}
+      } catch (err) {
+        console.warn('Manual getUserMedia fallback failed:', err);
+      }
     }
+  };
+
+  const ensureVideoPlaying = async () => {
+    const vid = videoRef.current;
+    if (!vid) return;
+    try { await vid.play(); } catch {}
+    if (vid.readyState >= 2 && vid.videoWidth && vid.videoHeight) return;
+    await new Promise((resolve) => {
+      let settled = false;
+      const onReady = () => { if (!settled) { settled = true; cleanup(); resolve(); } };
+      const onCanPlay = () => onReady();
+      const onLoadedData = () => onReady();
+      const cleanup = () => {
+        vid.removeEventListener('canplay', onCanPlay);
+        vid.removeEventListener('loadeddata', onLoadedData);
+      };
+      vid.addEventListener('canplay', onCanPlay, { once: true });
+      vid.addEventListener('loadeddata', onLoadedData, { once: true });
+      setTimeout(() => onReady(), 1500);
+    });
   };
 
   // Removed BarcodeDetector path for simplicity
@@ -653,6 +689,7 @@ function App() {
                       autoPlay={true} 
                       muted={true} 
                       playsInline={true}
+                      disablePictureInPicture={true}
                     />
                     </div>
 
@@ -660,50 +697,13 @@ function App() {
 
                     {/* Scanning hint removed */}
 
-                    {/* Zoom & Camera Controls */}
-                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
-                      <button
-                        onClick={handleZoomIn}
-                        className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-black text-sm font-bold ml-1">+</span>
-                      </button>
-                      <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
-                        {Math.round(zoomLevel * 100)}%
-                      </div>
-                      <button
-                        onClick={handleZoomOut}
-                        className="w-12 h-12 bg-gray-400 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-500 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-black text-sm font-bold ml-1">-</span>
-                      </button>
-                      <div className="flex gap-2 mt-1">
-                        <button onClick={switchCamera} className="px-2 py-1 bg-white/20 text-white rounded text-xs">Switch</button>
-                        {hasTorch && (
-                          <button onClick={toggleTorch} className={`px-2 py-1 rounded text-xs ${isTorchOn ? 'bg-yellow-400 text-black' : 'bg-white/20 text-white'}`}>
-                            {isTorchOn ? 'Torch On' : 'Torch Off'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                    {/* Controls removed to match reference; using built-in overlay only */}
 
-                    {/* Close Button */}
-                    <div className="absolute top-4 right-4">
-                      <button
-                        onClick={closeCamera}
-                        className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center shadow-lg hover:bg-red-600 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
+                    {/* Stop Scanning Button (full width) */}
+                    <div className="mt-4">
+                      <button onClick={closeCamera} className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2 w-full">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256"><rect width="256" height="256" fill="none"></rect><line x1="200" y1="56" x2="56" y2="200" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"></line><line x1="200" y1="200" x2="56" y2="56" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"></line></svg>
+                        Stop Scanning
                       </button>
                     </div>
 
