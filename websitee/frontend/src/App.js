@@ -352,6 +352,35 @@ function App() {
     }
   };
 
+  // Camera controls inside scanner UI
+  const switchCamera = async () => {
+    try {
+      if (!qrScannerRef.current) return;
+      const list = await window.QrScanner.listCameras(true);
+      if (!Array.isArray(list) || list.length === 0) return;
+      const currentIdx = Math.max(0, list.findIndex((c) => c.id === currentCameraId));
+      const next = list[(currentIdx + 1) % list.length];
+      await qrScannerRef.current.setCamera(next.id);
+      setCurrentCameraId(next.id);
+      try { setHasTorch(!!(await qrScannerRef.current.hasFlash())); setIsTorchOn(false); } catch {}
+    } catch {}
+  };
+
+  const toggleTorch = async () => {
+    try {
+      if (!qrScannerRef.current) return;
+      const supported = await qrScannerRef.current.hasFlash();
+      if (!supported) { setHasTorch(false); return; }
+      if (isTorchOn) {
+        await qrScannerRef.current.turnFlashOff();
+        setIsTorchOn(false);
+      } else {
+        await qrScannerRef.current.turnFlashOn();
+        setIsTorchOn(true);
+      }
+    } catch {}
+  };
+
   const handleZoomIn = () => {
     setZoomLevel((prev) => {
       const next = Math.min(prev + 0.1, 3);
@@ -603,7 +632,7 @@ function App() {
 
                     {/* Scanning hint removed */}
 
-                    {/* Zoom Buttons */}
+                    {/* Zoom & Camera Controls */}
                     <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
                       <button
                         onClick={handleZoomIn}
@@ -628,6 +657,10 @@ function App() {
                         </svg>
                         <span className="text-black text-sm font-bold ml-1">-</span>
                       </button>
+                      <div className="flex gap-2 mt-1">
+                        <button onClick={switchCamera} className="px-2 py-1 bg-white/20 text-white rounded text-xs">Switch</button>
+                        <button onClick={toggleTorch} className={`px-2 py-1 rounded text-xs ${isTorchOn ? 'bg-yellow-400 text-black' : 'bg-white/20 text-white'}`}>{isTorchOn ? 'Torch On' : 'Torch Off'}</button>
+                      </div>
                     </div>
 
                     {/* Close Button */}
