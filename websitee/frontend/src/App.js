@@ -240,7 +240,21 @@ function App() {
     }
     
     console.log('🔍 Initializing QR scanner...');
+    ensureVideoElementAttributes();
     ensureCameraAccess().then(startZxingScanner);
+  };
+
+  const ensureVideoElementAttributes = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.setAttribute('muted', '');
+      v.setAttribute('autoplay', '');
+      v.removeAttribute('controls');
+      v.style.transform = 'scaleX(1)';
+    } catch {}
   };
 
   const ensureCameraAccess = async () => {
@@ -284,6 +298,16 @@ function App() {
 
     try {
       if (qrScannerRef.current) await qrScannerRef.current.stop();
+      // Detach any stale stream
+      try { if (videoRef.current) { const s = videoRef.current.srcObject; videoRef.current.srcObject = null; if (s) s.getTracks?.().forEach(t=>t.stop()); } } catch {}
+      // Check camera availability early
+      try {
+        const hasCam = await window.QrScanner.hasCamera();
+        if (!hasCam) {
+          alert('No camera found on this device');
+          return;
+        }
+      } catch {}
       qrScannerRef.current = new window.QrScanner(
         videoRef.current,
         (result) => {
@@ -323,6 +347,14 @@ function App() {
         } catch (err) {
           console.warn('Secondary manual stream failed:', err);
         }
+      }
+      // iOS specific: try setting srcObject via createObjectURL fallback
+      if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0) && videoRef.current.srcObject) {
+        try {
+          // Some old iOS need load()+play() sequence
+          await videoRef.current.load?.();
+          await videoRef.current.play?.();
+        } catch {}
       }
       // If still black, switch to front camera as a fallback
       if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0)) {
