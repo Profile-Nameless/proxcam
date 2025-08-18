@@ -77,6 +77,7 @@ function App() {
   const [showAddUserButton, setShowAddUserButton] = useState(false);
   const dateTapCountRef = useRef(0);
   const [, setScanningHint] = useState('');
+  const [zoomLevel, setZoomLevel] = useState(1);
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
@@ -311,6 +312,16 @@ function App() {
       await qrScannerRef.current.start();
       // Force play and wait for video to be rendering
       await ensureVideoPlaying();
+      // If still not rendering, try manual stream fallback
+      if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0)) {
+        try {
+          const manual = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+          videoRef.current.srcObject = manual;
+          await ensureVideoPlaying();
+        } catch (err) {
+          console.warn('Secondary manual stream failed:', err);
+        }
+      }
       // If the video didn't render yet, unhide again
       if (videoRef.current) videoRef.current.classList.remove('hidden');
       console.log('✅ QrScanner started');
@@ -382,7 +393,33 @@ function App() {
 
   // Removed WASM worker path for now (reworking processing)
 
-  
+  const applyZoom = (zoom) => {
+    const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
+    const capabilities = track?.getCapabilities?.();
+    if (capabilities && capabilities.zoom) {
+      track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
+      if (videoRef.current) videoRef.current.style.transform = '';
+    } else if (videoRef.current) {
+      videoRef.current.style.transformOrigin = 'center center';
+      videoRef.current.style.transform = `scale(${zoom})`;
+    }
+  };
+
+  const handleZoomIn = () => {
+    setZoomLevel((prev) => {
+      const next = Math.min(prev + 0.1, 3);
+      applyZoom(next);
+      return next;
+    });
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel((prev) => {
+      const next = Math.max(prev - 0.1, 1);
+      applyZoom(next);
+      return next;
+    });
+  };
 
   // Camera controls inside scanner UI
   
@@ -641,7 +678,32 @@ function App() {
 
                     {/* Scanning hint removed */}
 
-                    {/* Controls removed to match reference; using built-in overlay only */}
+                    {/* Zoom Controls */}
+                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
+                      <button
+                        onClick={handleZoomIn}
+                        className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500 transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-black text-sm font-bold ml-1">+</span>
+                      </button>
+                      <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+                        {Math.round(zoomLevel * 100)}%
+                      </div>
+                      <button
+                        onClick={handleZoomOut}
+                        className="w-12 h-12 bg-gray-400 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-500 transition-colors"
+                      >
+                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-black text-sm font-bold ml-1">-</span>
+                      </button>
+                    </div>
 
                     {/* Stop Scanning Button (full width) */}
                     <div className="mt-4">
