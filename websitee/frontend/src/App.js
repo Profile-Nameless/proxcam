@@ -673,8 +673,12 @@ function App() {
                       </button>
                       <div className="flex gap-2 mt-1">
                         <button onClick={switchCamera} className="px-2 py-1 bg-white/20 text-white rounded text-xs">Switch</button>
-                        <button onClick={toggleTorch} className={`px-2 py-1 rounded text-xs ${isTorchOn ? 'bg-yellow-400 text-black' : 'bg-white/20 text-white'}`}>{isTorchOn ? 'Torch On' : 'Torch Off'}</button>
-                    </div>
+                        {hasTorch && (
+                          <button onClick={toggleTorch} className={`px-2 py-1 rounded text-xs ${isTorchOn ? 'bg-yellow-400 text-black' : 'bg-white/20 text-white'}`}>
+                            {isTorchOn ? 'Torch On' : 'Torch Off'}
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Close Button */}
