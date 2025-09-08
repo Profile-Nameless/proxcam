@@ -231,8 +231,6 @@ function App() {
     setIsCameraOpen(true);
     setAttendanceResults([]);
     setScanningHint('Initializing camera...');
-    // Start immediately to preserve user-gesture context on mobile (iOS may block play after async timers)
-    startScanner();
   };
 
   const closeCamera = () => {
@@ -248,9 +246,24 @@ function App() {
       return;
     }
     console.log('🔍 Initializing HTML5 QR scanner...');
-    ensureVideoElementAttributes();
     ensureCameraAccess().then(startHtml5QrScanner);
   };
+
+  // Start scanner only after the UI with the reader div has rendered
+  useEffect(() => {
+    if (isCameraOpen) {
+      const el = readerContainer();
+      if (!el) {
+        // Defer to next tick to allow DOM to paint
+        setTimeout(() => {
+          const el2 = readerContainer();
+          if (el2) startScanner();
+        }, 0);
+      } else {
+        startScanner();
+      }
+    }
+  }, [isCameraOpen]);
 
   const ensureVideoElementAttributes = () => {
     const v = videoRef.current;
@@ -337,13 +350,11 @@ function App() {
           throw primaryErr;
         }
       }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: chosenCameraId ? { exact: chosenCameraId } : undefined } });
-        videoTrackRef.current = stream.getVideoTracks()[0];
-      } catch {}
+      // Note: relying on html5-qrcode's internal stream; we skip creating our own to avoid conflicts
       console.log('✅ html5-qrcode started');
     } catch (e) {
       console.error('Failed to start html5-qrcode', e);
+      try { alert('Camera failed to start: ' + (e?.message || e) + '\nTips: allow camera permission and use HTTPS (or localhost).'); } catch {}
     }
   };
 
