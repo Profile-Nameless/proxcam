@@ -292,6 +292,7 @@ function App() {
     return readerDivRef.current || document.getElementById('reader');
   };
 
+  // eslint-disable-next-line no-unused-vars
   const startHtml5QrScanner = async () => {
     // assign the ref now that the function exists
     startHtml5QrScannerRef.current = startHtml5QrScanner;
