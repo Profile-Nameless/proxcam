@@ -239,15 +239,9 @@ function App() {
     stopScanner();
   };
 
-  const startScanner = () => {
-    if (!readerContainer()) {
-      console.error('❌ Reader container not available');
-      setScanningHint('Camera initialization failed');
-      return;
-    }
-    console.log('🔍 Initializing HTML5 QR scanner...');
-    ensureCameraAccess().then(startHtml5QrScanner);
-  };
+  // Bridge to call scanner start without introducing hook deps warnings
+  const startHtml5QrScannerRef = useRef(startHtml5QrScanner);
+  useEffect(() => { startHtml5QrScannerRef.current = startHtml5QrScanner; });
 
   // Start scanner only after the UI with the reader div has rendered
   useEffect(() => {
@@ -257,12 +251,10 @@ function App() {
         // Defer to next tick to allow DOM to paint
         setTimeout(() => {
           const el2 = readerContainer();
-          if (el2) {
-            ensureCameraAccess().then(startHtml5QrScanner);
-          }
+          if (el2) { ensureCameraAccess().then(() => startHtml5QrScannerRef.current?.()); }
         }, 0);
       } else {
-        ensureCameraAccess().then(startHtml5QrScanner);
+        ensureCameraAccess().then(() => startHtml5QrScannerRef.current?.());
       }
     }
   }, [isCameraOpen]);
