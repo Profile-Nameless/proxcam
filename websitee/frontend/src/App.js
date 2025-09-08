@@ -681,64 +681,40 @@ function App() {
             {isCameraOpen && (
               <div className="bg-black rounded-lg shadow-2xl mb-6 transition-all duration-300 w-full">
                 <div className="p-4 sm:p-6">
-                  <div className="relative">
-                    {/* QR Scanner Container for HTML5 */}
-                    {/* Removed HTML5 scanner container */}
-                    
-                    {/* Scanner container (html5-qrcode) with visible video preview */}
-                    <div className="rounded-lg bg-black h-80 sm:h-96 w-full overflow-hidden relative">
-                      <video 
+                  {/* New camera UI */}
+                  <div className="rounded-xl border border-gray-800/50 bg-black/60 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/60">
+                      <div className="text-white text-sm font-medium">Camera</div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => { ensureCameraAccess().then(() => startHtml5QrScannerRef.current?.()); }} className="px-3 py-1.5 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-500">Restart</button>
+                        <button onClick={closeCamera} className="px-3 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700">Stop</button>
+                      </div>
+                    </div>
+
+                    <div className="relative h-80 sm:h-96">
+                      <video
                         ref={videoRef}
                         className="absolute inset-0 w-full h-full object-cover z-0"
                         autoPlay
                         muted
                         playsInline
                       />
-                      <div id="reader" ref={readerDivRef} className="absolute inset-0 w-full h-full z-0" style={{ opacity: 0, pointerEvents: 'none' }}></div>
-                    </div>
+                      <div id="reader" ref={readerDivRef} className="absolute inset-0 w-full h-full z-10" style={{ opacity: 0, pointerEvents: 'none' }}></div>
 
-                    {/* Built-in QrScanner overlay will draw region and outline */}
-
-                    {/* Scanning hint removed */}
-
-                    {/* Zoom Controls */}
-                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2 z-20">
-                      <button
-                        onClick={handleZoomIn}
-                        className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-black text-sm font-bold ml-1">+</span>
-                      </button>
-                      <div className="bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
-                        {Math.round(zoomLevel * 100)}%
+                      {/* Zoom cluster */}
+                      <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2 z-20">
+                        <button onClick={handleZoomIn} aria-label="Zoom in" className="w-11 h-11 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500">
+                          <span className="text-black font-bold">+</span>
+                        </button>
+                        <div className="bg-black/70 text-white px-2 py-0.5 rounded text-[11px]">
+                          {Math.round(zoomLevel * 100)}%
+                        </div>
+                        <button onClick={handleZoomOut} aria-label="Zoom out" className="w-11 h-11 bg-gray-400 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-500">
+                          <span className="text-black font-bold">-</span>
+                        </button>
                       </div>
-                      <button
-                        onClick={handleZoomOut}
-                        className="w-12 h-12 bg-gray-400 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-500 transition-colors"
-                      >
-                        <svg className="w-5 h-5 text-black" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                          <path fillRule="evenodd" d="M8 6a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-black text-sm font-bold ml-1">-</span>
-                      </button>
-                      {/* Switch removed per request */}
                     </div>
-
-                    {/* Stop Scanning Button (full width) */}
-                    <div className="mt-4">
-                      <button onClick={closeCamera} className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2 w-full">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256"><rect width="256" height="256" fill="none"></rect><line x1="200" y1="56" x2="56" y2="200" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"></line><line x1="200" y1="200" x2="56" y2="56" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="16"></line></svg>
-                        Stop Scanning
-                      </button>
-                    </div>
-
-                    {/* Scanner Indicator removed */}
-                    </div>
+                  </div>
                 </div>
               </div>
             )}
