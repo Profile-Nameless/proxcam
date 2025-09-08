@@ -347,29 +347,7 @@ function App() {
     }
   };
 
-  const ensureVideoPlaying = async () => {
-    const vid = videoRef.current;
-    if (!vid) return;
-    try {
-      await vid.play();
-    } catch (err) {
-      console.warn('Video play() was blocked or failed:', err);
-    }
-    if (vid.readyState >= 2 && vid.videoWidth && vid.videoHeight) return;
-    await new Promise((resolve) => {
-      let settled = false;
-      const onReady = () => { if (!settled) { settled = true; cleanup(); resolve(); } };
-      const onCanPlay = () => onReady();
-      const onLoadedData = () => onReady();
-      const cleanup = () => {
-        vid.removeEventListener('canplay', onCanPlay);
-        vid.removeEventListener('loadeddata', onLoadedData);
-      };
-      vid.addEventListener('canplay', onCanPlay, { once: true });
-      vid.addEventListener('loadeddata', onLoadedData, { once: true });
-      setTimeout(() => onReady(), 5000);
-    });
-  };
+  // removed ensureVideoPlaying (no longer needed with html5-qrcode)
 
   // Removed BarcodeDetector path for simplicity
 
