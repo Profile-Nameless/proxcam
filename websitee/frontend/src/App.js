@@ -326,16 +326,28 @@ function App() {
           handleQRScan(decodedText);
         });
       };
+      let usedCamera = null;
       try {
-        if (chosenCameraId) await startCamera(chosenCameraId); else throw new Error('No camera id');
+        if (chosenCameraId) { await startCamera(chosenCameraId); usedCamera = { deviceId: chosenCameraId }; }
+        else throw new Error('No camera id');
       } catch (primaryErr) {
         try {
           await startCamera({ facingMode: 'user' });
+          usedCamera = { facingMode: 'user' };
         } catch (fallbackErr) {
           throw primaryErr;
         }
       }
-      // Note: relying on html5-qrcode's internal stream; we skip creating our own to avoid conflicts
+
+      // Create a separate preview stream to ensure visible video on some mobile browsers
+      try {
+        const previewStream = await navigator.mediaDevices.getUserMedia({ video: usedCamera || { facingMode: { ideal: 'environment' } }, audio: false });
+        if (videoRef.current) {
+          videoRef.current.srcObject = previewStream;
+          await videoRef.current.play().catch(() => {});
+        }
+      } catch {}
+
       console.log('✅ html5-qrcode started');
     } catch (e) {
       console.error('Failed to start html5-qrcode', e);
@@ -649,8 +661,15 @@ function App() {
                     {/* QR Scanner Container for HTML5 */}
                     {/* Removed HTML5 scanner container */}
                     
-                    {/* Scanner container (html5-qrcode), sized to match previous video wrapper */}
+                    {/* Scanner container (html5-qrcode) with visible video preview */}
                     <div className="rounded-lg bg-black h-80 sm:h-96 w-full overflow-hidden relative">
+                      <video 
+                        ref={videoRef}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        autoPlay
+                        muted
+                        playsInline
+                      />
                       <div id="reader" ref={readerDivRef} className="absolute inset-0 w-full h-full"></div>
                     </div>
 
