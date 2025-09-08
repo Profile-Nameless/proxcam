@@ -257,26 +257,17 @@ function App() {
         // Defer to next tick to allow DOM to paint
         setTimeout(() => {
           const el2 = readerContainer();
-          if (el2) startScanner();
+          if (el2) {
+            ensureCameraAccess().then(startHtml5QrScanner);
+          }
         }, 0);
       } else {
-        startScanner();
+        ensureCameraAccess().then(startHtml5QrScanner);
       }
     }
   }, [isCameraOpen]);
 
-  const ensureVideoElementAttributes = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    try {
-      v.setAttribute('playsinline', '');
-      v.setAttribute('webkit-playsinline', '');
-      v.setAttribute('muted', '');
-      v.setAttribute('autoplay', '');
-      v.removeAttribute('controls');
-      v.style.transform = 'scaleX(1)';
-    } catch {}
-  };
+  // removed ensureVideoElementAttributes (not needed with html5-qrcode)
 
   const ensureCameraAccess = async () => {
     try {
