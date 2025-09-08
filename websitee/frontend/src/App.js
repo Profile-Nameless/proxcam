@@ -341,9 +341,19 @@ function App() {
 
       // Create a separate preview stream to ensure visible video on some mobile browsers
       try {
-        const previewStream = await navigator.mediaDevices.getUserMedia({ video: usedCamera || { facingMode: { ideal: 'environment' } }, audio: false });
+        const constraints = usedCamera?.deviceId
+          ? { deviceId: { exact: usedCamera.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+          : (usedCamera?.facingMode ? { facingMode: usedCamera.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } } : { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } });
+        const previewStream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false });
         if (videoRef.current) {
           videoRef.current.srcObject = previewStream;
+          const track = previewStream.getVideoTracks?.()[0];
+          const caps = track?.getCapabilities?.();
+          if (caps?.width?.max && caps?.height?.max) {
+            const targetW = Math.min(1920, caps.width.max);
+            const targetH = Math.min(1080, caps.height.max);
+            await track.applyConstraints({ width: targetW, height: targetH }).catch(() => {});
+          }
           await videoRef.current.play().catch(() => {});
         }
       } catch {}
@@ -670,7 +680,7 @@ function App() {
                         muted
                         playsInline
                       />
-                      <div id="reader" ref={readerDivRef} className="absolute inset-0 w-full h-full"></div>
+                      <div id="reader" ref={readerDivRef} className="absolute inset-0 w-full h-full" style={{ opacity: 0, pointerEvents: 'none' }}></div>
                     </div>
 
                     {/* Built-in QrScanner overlay will draw region and outline */}
