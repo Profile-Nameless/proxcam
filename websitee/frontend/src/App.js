@@ -240,8 +240,7 @@ function App() {
   };
 
   // Bridge to call scanner start without introducing hook deps warnings
-  const startHtml5QrScannerRef = useRef(startHtml5QrScanner);
-  useEffect(() => { startHtml5QrScannerRef.current = startHtml5QrScanner; });
+  const startHtml5QrScannerRef = useRef(null);
 
   // Start scanner only after the UI with the reader div has rendered
   useEffect(() => {
@@ -294,6 +293,8 @@ function App() {
   };
 
   const startHtml5QrScanner = async () => {
+    // assign the ref now that the function exists
+    startHtml5QrScannerRef.current = startHtml5QrScanner;
     const Html5Qrcode = await loadHtml5QrCdn();
     if (!Html5Qrcode) {
       console.error('Failed to load html5-qrcode');
