@@ -323,6 +323,11 @@ function App() {
       const startCamera = async (camera) => {
         await html5QrRef.current.start(camera, cfg, (decodedText) => {
           try { html5QrRef.current?.stop(); } catch {}
+          // also stop preview stream if any
+          try { const s = videoRef.current?.srcObject; s && s.getTracks?.().forEach(t=>t.stop()); } catch {}
+          try { if (videoRef.current) videoRef.current.srcObject = null; } catch {}
+          // close camera UI
+          try { setIsCameraOpen(false); } catch {}
           handleQRScan(decodedText);
         });
       };
@@ -684,7 +689,7 @@ function App() {
                     <div className="rounded-lg bg-black h-80 sm:h-96 w-full overflow-hidden relative">
                       <video 
                         ref={videoRef}
-                        className="absolute inset-0 w-full h-full object-cover z-10"
+                        className="absolute inset-0 w-full h-full object-cover z-0"
                         autoPlay
                         muted
                         playsInline
@@ -697,7 +702,7 @@ function App() {
                     {/* Scanning hint removed */}
 
                     {/* Zoom Controls */}
-                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2">
+                    <div className="absolute bottom-4 right-4 flex flex-col items-center gap-2 z-20">
                       <button
                         onClick={handleZoomIn}
                         className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center shadow-lg hover:bg-yellow-500 transition-colors"
