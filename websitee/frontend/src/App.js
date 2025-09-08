@@ -355,6 +355,12 @@ function App() {
             await track.applyConstraints({ width: targetW, height: targetH }).catch(() => {});
           }
           await videoRef.current.play().catch(() => {});
+          // Prefer hardware zoom when supported
+          try {
+            if (caps?.zoom?.max) {
+              await track.applyConstraints({ advanced: [{ zoom: Math.min(2, caps.zoom.max) }] }).catch(() => {});
+            }
+          } catch {}
         }
       } catch {}
 
@@ -364,6 +370,9 @@ function App() {
       try { alert('Camera failed to start: ' + (e?.message || e) + '\nTips: allow camera permission and use HTTPS (or localhost).'); } catch {}
     }
   };
+
+  // Ensure the callable is available before effects run
+  startHtml5QrScannerRef.current = startHtml5QrScanner;
 
   // removed ensureVideoPlaying (no longer needed with html5-qrcode)
 
@@ -675,12 +684,12 @@ function App() {
                     <div className="rounded-lg bg-black h-80 sm:h-96 w-full overflow-hidden relative">
                       <video 
                         ref={videoRef}
-                        className="absolute inset-0 w-full h-full object-cover"
+                        className="absolute inset-0 w-full h-full object-cover z-10"
                         autoPlay
                         muted
                         playsInline
                       />
-                      <div id="reader" ref={readerDivRef} className="absolute inset-0 w-full h-full" style={{ opacity: 0, pointerEvents: 'none' }}></div>
+                      <div id="reader" ref={readerDivRef} className="absolute inset-0 w-full h-full z-0" style={{ opacity: 0, pointerEvents: 'none' }}></div>
                     </div>
 
                     {/* Built-in QrScanner overlay will draw region and outline */}
