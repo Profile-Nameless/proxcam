@@ -72,13 +72,15 @@ function App() {
   const [loading, setLoading] = useState(false);
   const videoRef = useRef(null);
   const qrScannerRef = useRef(null);
+  const html5QrRef = useRef(null);
+  const videoTrackRef = useRef(null);
+  const readerDivRef = useRef(null);
   const [showQRScannedPopup, setShowQRScannedPopup] = useState(false);
   const [userCookies, setUserCookies] = useState([]);
   const [showAddUserButton, setShowAddUserButton] = useState(false);
   const dateTapCountRef = useRef(0);
   const [, setScanningHint] = useState('');
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [currentCameraId, setCurrentCameraId] = useState('');
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanProgress, setScanProgress] = useState({ completed: 0, total: 0 });
   const isReadyToScan = users.length > 0 && userCookies.length === users.length && userCookies.every(Boolean);
@@ -141,10 +143,18 @@ function App() {
       if (qrScannerRef.current) {
         try { qrScannerRef.current.stop(); } catch {}
       }
+      if (html5QrRef.current) {
+        try { html5QrRef.current.stop(); } catch {}
+        html5QrRef.current = null;
+      }
       if (videoElement && videoElement.srcObject) {
         const stream = videoElement.srcObject;
         const tracks = stream.getTracks();
         tracks.forEach(track => track.stop());
+      }
+      if (videoTrackRef.current) {
+        try { videoTrackRef.current.stop(); } catch {}
+        videoTrackRef.current = null;
       }
     };
   }, []);
@@ -221,9 +231,8 @@ function App() {
     setIsCameraOpen(true);
     setAttendanceResults([]);
     setScanningHint('Initializing camera...');
-    setTimeout(() => {
-      startScanner();
-    }, 300);
+    // Start immediately to preserve user-gesture context on mobile (iOS may block play after async timers)
+    startScanner();
   };
 
   const closeCamera = () => {
@@ -233,15 +242,14 @@ function App() {
   };
 
   const startScanner = () => {
-    if (!videoRef.current) {
-      console.error('❌ Video ref not available');
+    if (!readerContainer()) {
+      console.error('❌ Reader container not available');
       setScanningHint('Camera initialization failed');
       return;
     }
-    
-    console.log('🔍 Initializing QR scanner...');
+    console.log('🔍 Initializing HTML5 QR scanner...');
     ensureVideoElementAttributes();
-    ensureCameraAccess().then(startZxingScanner);
+    ensureCameraAccess().then(startHtml5QrScanner);
   };
 
   const ensureVideoElementAttributes = () => {
@@ -262,7 +270,11 @@ function App() {
       if (!navigator.mediaDevices?.getUserMedia) return;
       // HTTPS requirement (except localhost)
       const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost';
-      if (!isSecure) return;
+      if (!isSecure) {
+        console.warn('Insecure origin detected. Camera requires HTTPS or localhost.');
+        try { alert('Camera requires HTTPS. Please open this site over https or use localhost.'); } catch {}
+        return;
+      }
       // Probe to trigger permission prompt once
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       try { stream.getTracks().forEach(t => t.stop()); } catch {}
@@ -271,154 +283,78 @@ function App() {
     }
   };
 
-  const loadQrScannerCdn = () => new Promise((resolve) => {
-    if (window.QrScanner) return resolve(window.QrScanner);
+  const loadHtml5QrCdn = () => new Promise((resolve) => {
+    if (window.Html5Qrcode) return resolve(window.Html5Qrcode);
     const s = document.createElement('script');
-    s.src = 'https://unpkg.com/qr-scanner@1.4.2/qr-scanner.min.js';
+    s.src = 'https://unpkg.com/html5-qrcode';
     s.async = true;
-    s.onload = () => resolve(window.QrScanner);
+    s.onload = () => resolve(window.Html5Qrcode);
     s.onerror = () => resolve(null);
     document.head.appendChild(s);
   });
 
-  const startZxingScanner = async () => {
-    console.log('📱 Starting QR Scanner (qr-scanner CDN)...');
-    const QrScannerLib = await loadQrScannerCdn();
-    if (!QrScannerLib) {
-      console.error('Failed to load qr-scanner');
+  const readerContainer = () => {
+    return readerDivRef.current || document.getElementById('reader');
+  };
+
+  const startHtml5QrScanner = async () => {
+    const Html5Qrcode = await loadHtml5QrCdn();
+    if (!Html5Qrcode) {
+      console.error('Failed to load html5-qrcode');
       return;
     }
-    try { QrScannerLib.WORKER_PATH = '/qr-scanner-worker.min.js'; } catch {}
-    // Ensure video is visible before starting (in case it was hidden after a prior scan)
-      if (videoRef.current) {
-      try { videoRef.current.classList.remove('hidden'); } catch {}
-    }
-    
-    // Using qr-scanner defaults; no explicit getUserMedia constraints here
-
     try {
-      if (qrScannerRef.current) await qrScannerRef.current.stop();
-      // Detach any stale stream
-      try { if (videoRef.current) { const s = videoRef.current.srcObject; videoRef.current.srcObject = null; if (s) s.getTracks?.().forEach(t=>t.stop()); } } catch {}
-      // Check camera availability early
+      if (html5QrRef.current) {
+        try { await html5QrRef.current.stop(); } catch {}
+        html5QrRef.current = null;
+      }
+      const el = readerContainer();
+      if (!el) return;
+      const cfg = { fps: 10, qrbox: { width: 250, height: 250 } };
+      // Ensure the element has a stable id
+      if (!el.id) el.id = 'reader';
+      html5QrRef.current = new Html5Qrcode(el.id);
+      let chosenCameraId = null;
       try {
-        const hasCam = await window.QrScanner.hasCamera();
-        if (!hasCam) {
-          alert('No camera found on this device');
-          return;
+        const cameras = await Html5Qrcode.getCameras();
+        if (cameras && cameras.length) {
+          const preferred = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[0];
+          chosenCameraId = preferred.id;
         }
       } catch {}
-      qrScannerRef.current = new window.QrScanner(
-        videoRef.current,
-        (result) => {
-          const text = result?.data || result;
-          if (!text) return;
-          handleQRScan(text);
-          try { qrScannerRef.current?.stop(); } catch {}
-          if (videoRef.current) videoRef.current.classList.add('hidden');
-        },
-        { preferredCamera: 'environment', highlightScanRegion: true, highlightCodeOutline: true, maxScansPerSecond: 30, returnDetailedScanResult: true }
-      );
-      // Match reference decoder behavior
-      try { await qrScannerRef.current.setInversionMode('both'); } catch {}
-      try { await qrScannerRef.current.setGrayscaleWeights(77, 150, 29, true); } catch {}
-      // Try setting environment camera explicitly before listing (some browsers require exact constraint)
-      try { await qrScannerRef.current.setCamera({ facingMode: { exact: 'environment' } }); } catch {}
-      // Prefer explicit back camera by deviceId if available
+      const startCamera = async (camera) => {
+        await html5QrRef.current.start(camera, cfg, (decodedText) => {
+          try { html5QrRef.current?.stop(); } catch {}
+          handleQRScan(decodedText);
+        });
+      };
       try {
-        const list = await window.QrScanner.listCameras(true);
-        if (Array.isArray(list) && list.length) {
-          const back = list.find(c => /back|rear|environment/i.test(c.label)) || list[list.length - 1];
-          if (back?.id) {
-            await qrScannerRef.current.setCamera(back.id);
-            setCurrentCameraId(back.id);
-          }
+        if (chosenCameraId) await startCamera(chosenCameraId); else throw new Error('No camera id');
+      } catch (primaryErr) {
+        try {
+          await startCamera({ facingMode: 'user' });
+        } catch (fallbackErr) {
+          throw primaryErr;
         }
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: chosenCameraId ? { exact: chosenCameraId } : undefined } });
+        videoTrackRef.current = stream.getVideoTracks()[0];
       } catch {}
-      await qrScannerRef.current.start();
-      // Force play and wait for video to be rendering
-      await ensureVideoPlaying();
-      // If still not rendering, try manual stream fallback
-      if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0)) {
-        try {
-          const manual = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
-          videoRef.current.srcObject = manual;
-          await ensureVideoPlaying();
-        } catch (err) {
-          console.warn('Secondary manual stream failed:', err);
-        }
-      }
-      // iOS specific: try setting srcObject via createObjectURL fallback
-      if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0) && videoRef.current.srcObject) {
-        try {
-          // Some old iOS need load()+play() sequence
-          await videoRef.current.load?.();
-          await videoRef.current.play?.();
-        } catch {}
-      }
-      // If still black, switch to front camera as a fallback
-      if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0)) {
-        try {
-          await qrScannerRef.current.setCamera('user');
-          await ensureVideoPlaying();
-        } catch {}
-        if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0)) {
-          try {
-            const manualFront = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
-            videoRef.current.srcObject = manualFront;
-            await ensureVideoPlaying();
-          } catch {}
-        }
-      }
-      // If still black, brute-force try deviceIds
-      if (videoRef.current && (!videoRef.current.videoWidth || videoRef.current.videoWidth === 0)) {
-        try {
-          const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
-          for (const dev of devices) {
-            try {
-              await qrScannerRef.current.setCamera(dev.deviceId);
-              await ensureVideoPlaying();
-              if (videoRef.current.videoWidth && videoRef.current.videoWidth > 0) {
-                setCurrentCameraId(dev.deviceId || '');
-                break;
-              }
-            } catch {}
-            try {
-              const manualDev = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: dev.deviceId } }, audio: false });
-              videoRef.current.srcObject = manualDev;
-              await ensureVideoPlaying();
-              if (videoRef.current.videoWidth && videoRef.current.videoWidth > 0) {
-                setCurrentCameraId(dev.deviceId || '');
-                break;
-              }
-            } catch {}
-          }
-        } catch {}
-      }
-      // If the video didn't render yet, unhide again
-      if (videoRef.current) videoRef.current.classList.remove('hidden');
-      console.log('✅ QrScanner started');
+      console.log('✅ html5-qrcode started');
     } catch (e) {
-      console.error('Failed to start QrScanner', e);
-      // Fallback: try manual getUserMedia to attach a stream so video isn't black
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await ensureVideoPlaying();
-        }
-        // Try starting scanner again (it will take over the stream)
-        try { await qrScannerRef.current?.start(); await ensureVideoPlaying(); } catch {}
-      } catch (err) {
-        console.warn('Manual getUserMedia fallback failed:', err);
-      }
+      console.error('Failed to start html5-qrcode', e);
     }
   };
 
   const ensureVideoPlaying = async () => {
     const vid = videoRef.current;
     if (!vid) return;
-    try { await vid.play(); } catch {}
+    try {
+      await vid.play();
+    } catch (err) {
+      console.warn('Video play() was blocked or failed:', err);
+    }
     if (vid.readyState >= 2 && vid.videoWidth && vid.videoHeight) return;
     await new Promise((resolve) => {
       let settled = false;
@@ -446,6 +382,7 @@ function App() {
   const stopScanner = () => {
     console.log('⏹️ Stopping scanner...');
     if (qrScannerRef.current) { try { qrScannerRef.current.stop(); } catch {} qrScannerRef.current = null; }
+    if (html5QrRef.current) { try { html5QrRef.current.stop(); } catch {} html5QrRef.current = null; }
     if (videoRef.current) { try { videoRef.current.classList.remove('hidden'); } catch {} }
     
     // Clean up video stream
@@ -461,13 +398,14 @@ function App() {
       videoRef.current.style.transform = '';
     }
     
+    if (videoTrackRef.current) { try { videoTrackRef.current.stop(); } catch {} videoTrackRef.current = null; }
     setScanningHint('');
   };
 
   // Removed WASM worker path for now (reworking processing)
 
   const applyZoom = (zoom) => {
-    const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
+    const track = videoTrackRef.current || videoRef.current?.srcObject?.getVideoTracks?.()[0];
     const capabilities = track?.getCapabilities?.();
     if (capabilities && capabilities.zoom) {
       track.applyConstraints({ advanced: [{ zoom }] }).catch(() => {});
@@ -737,16 +675,9 @@ function App() {
                     {/* QR Scanner Container for HTML5 */}
                     {/* Removed HTML5 scanner container */}
                     
-                    {/* Video element for ZXing (wrapped to keep zoom cropped, not resizing layout) */}
+                    {/* Scanner container (html5-qrcode), sized to match previous video wrapper */}
                     <div className="rounded-lg bg-black h-80 sm:h-96 w-full overflow-hidden relative">
-                    <video 
-                      ref={videoRef} 
-                        className="absolute inset-0 w-full h-full object-cover will-change-transform"
-                      autoPlay={true} 
-                      muted={true} 
-                      playsInline={true}
-                      disablePictureInPicture={true}
-                    />
+                      <div id="reader" ref={readerDivRef} className="absolute inset-0 w-full h-full"></div>
                     </div>
 
                     {/* Built-in QrScanner overlay will draw region and outline */}
@@ -790,7 +721,7 @@ function App() {
                     </div>
 
                     {/* Scanner Indicator removed */}
-                  </div>
+                    </div>
                 </div>
               </div>
             )}
@@ -903,3 +834,4 @@ function App() {
 }
 
 export default App;
+
